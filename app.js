@@ -1,10 +1,10 @@
 /* ==========================================================================
    CAMPEONATO DE FÚTBOL INFANTIL - APP CORE LOGIC (v4.0 Definitiva)
-   Club Atlético Comunicaciones de Mercedes (Corrientes)
+   Club Social Y Deportivo Comunicaciones de Mercedes (Corrientes)
    Categorías: 2015, 2016, 2017, 2018, 2019
    ========================================================================== */
 
-// Escudo Oficial Aurinegro de Club Atlético Comunicaciones de Mercedes (Corrientes)
+// Escudo Oficial Aurinegro de Club Social y Deportivo Comunicaciones de Mercedes (Corrientes)
 const OFFICIAL_COMU_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><clipPath id='crestOuter'><circle cx='50' cy='50' r='48'/></clipPath><clipPath id='crestRing'><path d='M 81.95,72.37 A 39,39 0 1 1 81.95,27.63 L 76.21,31.65 A 32,32 0 1 0 76.21,68.35 Z'/></clipPath><clipPath id='crestCore'><circle cx='50' cy='50' r='25'/></clipPath></defs><g clip-path='url(%23crestOuter)'><rect x='2' y='2' width='48' height='96' fill='%230a0a0a'/><rect x='50' y='2' width='48' height='96' fill='%23ffd700'/></g><circle cx='50' cy='50' r='46' fill='%23ffffff'/><g clip-path='url(%23crestRing)'><rect x='7' y='7' width='43' height='86' fill='%230a0a0a'/><rect x='50' y='7' width='43' height='86' fill='%23ffd700'/></g><circle cx='50' cy='50' r='32' fill='%23ffffff'/><g clip-path='url(%23crestCore)'><rect x='25' y='25' width='25' height='50' fill='%230a0a0a'/><rect x='50' y='25' width='25' height='50' fill='%23ffd700'/></g><circle cx='50' cy='50' r='48' fill='none' stroke='%230a0a0a' stroke-width='2'/></svg>`;
 
 const GENERIC_TEAM_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%231c2230' stroke='%23555b6b' stroke-width='2'/><circle cx='50' cy='42' r='16' fill='%23555b6b'/><path d='M22 82 C22 62 78 62 78 82 Z' fill='%23555b6b'/></svg>`;
@@ -643,7 +643,7 @@ function renderCrucesView() {
           <div class="champion-trophy">🏆</div>
           <h2 style="color: var(--primary-gold); font-weight: 900; text-transform: uppercase;">¡CAMPEÓN CATEGORÍA ${appState.currentCategory}!</h2>
           <h1 style="font-size: 2.2rem; color: #fff; margin-top: 0.5rem;">${getTeamName(playoffs.final.winner)}</h1>
-          <p style="color: var(--text-muted); margin-top: 0.5rem;">Club Atlético Comunicaciones de Mercedes Corrientes</p>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">Club Social y Deportivo Comunicaciones de Mercedes Corrientes</p>
         </div>
       ` : ''}
     `}
