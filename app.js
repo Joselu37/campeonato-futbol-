@@ -5,7 +5,9 @@
    ========================================================================== */
 
 // Escudo Oficial Aurinegro de Club Atlético Comunicaciones de Mercedes (Corrientes)
-const OFFICIAL_COMU_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 140'><g><path d='M60 5 L112 25 L112 75 C112 105 60 135 60 135 C60 135 8 105 8 75 L8 25 Z' fill='%23ffd700' stroke='%23000000' stroke-width='6'/><path d='M8 25 L112 25 L112 48 L8 48 Z' fill='%23000000'/><text x='60' y='41' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='13' fill='%23ffd700' letter-spacing='1'>COMUNICACIONES</text><rect x='22' y='48' width='15' height='68' fill='%23000000'/><rect x='52.5' y='48' width='15' height='75' fill='%23000000'/><rect x='83' y='48' width='15' height='68' fill='%23000000'/><path d='M20 70 L100 70 L100 95 L20 95 Z' fill='%23ffd700' stroke='%23000000' stroke-width='3'/><text x='60' y='88' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='14' fill='%23000000'>MERCEDES</text></g></svg>`;
+const OFFICIAL_COMU_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><clipPath id='crestOuter'><circle cx='50' cy='50' r='48'/></clipPath><clipPath id='crestRing'><path d='M 81.95,72.37 A 39,39 0 1 1 81.95,27.63 L 76.21,31.65 A 32,32 0 1 0 76.21,68.35 Z'/></clipPath><clipPath id='crestCore'><circle cx='50' cy='50' r='25'/></clipPath></defs><g clip-path='url(%23crestOuter)'><rect x='2' y='2' width='48' height='96' fill='%230a0a0a'/><rect x='50' y='2' width='48' height='96' fill='%23ffd700'/></g><circle cx='50' cy='50' r='46' fill='%23ffffff'/><g clip-path='url(%23crestRing)'><rect x='7' y='7' width='43' height='86' fill='%230a0a0a'/><rect x='50' y='7' width='43' height='86' fill='%23ffd700'/></g><circle cx='50' cy='50' r='32' fill='%23ffffff'/><g clip-path='url(%23crestCore)'><rect x='25' y='25' width='25' height='50' fill='%230a0a0a'/><rect x='50' y='25' width='25' height='50' fill='%23ffd700'/></g><circle cx='50' cy='50' r='48' fill='none' stroke='%230a0a0a' stroke-width='2'/></svg>`;
+
+const GENERIC_TEAM_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%231c2230' stroke='%23555b6b' stroke-width='2'/><circle cx='50' cy='42' r='16' fill='%23555b6b'/><path d='M22 82 C22 62 78 62 78 82 Z' fill='%23555b6b'/></svg>`;
 
 const TEAM_CRESTS = {
   comu: OFFICIAL_COMU_CREST,
@@ -102,7 +104,9 @@ function initData() {
           }
         });
       }
-      appState.sponsors = DEFAULT_SPONSORS;
+      if (!appState.sponsors || appState.sponsors.length === 0) {
+        appState.sponsors = DEFAULT_SPONSORS;
+      }
     } catch (e) {
       console.error('Error loading stored data:', e);
       generateDefaultTournamentState();
@@ -121,6 +125,104 @@ function saveState() {
     adminPin: appState.adminPin
   };
   localStorage.setItem('comu_torneo_app_state_v4', JSON.stringify(dataToSave));
+  pushStateToCloud();
+}
+
+/* ==========================================================================
+   SINCRONIZACIÓN EN TIEMPO REAL (Firebase Realtime Database)
+   Cuando el administrador guarda un resultado, horario o sponsor, ese cambio
+   se sube a la nube y se reparte automáticamente a todos los dispositivos
+   que tengan la app abierta, sin que nadie tenga que recargar la página.
+   Si "firebase-config.js" no fue configurado, la app sigue funcionando
+   igual que antes (solo con almacenamiento local en cada celular).
+   ========================================================================== */
+const CLOUD_STATE_PATH = 'comu_torneo_2026/state';
+let firebaseDB = null;
+let cloudSyncReady = false;
+
+function isFirebaseConfigured() {
+  const cfg = window.COMU_FIREBASE_CONFIG;
+  return !!(cfg && cfg.databaseURL && !cfg.databaseURL.includes('TU_PROYECTO'));
+}
+
+function initFirebaseSync() {
+  if (typeof firebase === 'undefined' || !isFirebaseConfigured()) {
+    updateSyncStatusIndicator('offline');
+    return;
+  }
+
+  try {
+    firebase.initializeApp(window.COMU_FIREBASE_CONFIG);
+    firebaseDB = firebase.database();
+    const stateRef = firebaseDB.ref(CLOUD_STATE_PATH);
+
+    // Escucha cambios en tiempo real (propios o de cualquier otro dispositivo)
+    stateRef.on('value', (snapshot) => {
+      const remoteData = snapshot.val();
+
+      if (!remoteData || !remoteData.categoriesData) {
+        // La nube todavía está vacía: la sembramos con los datos locales actuales
+        pushStateToCloud();
+        cloudSyncReady = true;
+        return;
+      }
+
+      appState.categoriesData = remoteData.categoriesData;
+      appState.sponsors = remoteData.sponsors || appState.sponsors;
+      appState.adminPin = remoteData.adminPin || appState.adminPin;
+
+      localStorage.setItem('comu_torneo_app_state_v4', JSON.stringify({
+        currentCategory: appState.currentCategory,
+        currentTab: appState.currentTab,
+        categoriesData: appState.categoriesData,
+        sponsors: appState.sponsors,
+        adminPin: appState.adminPin
+      }));
+
+      cloudSyncReady = true;
+      renderApp();
+    });
+
+    firebaseDB.ref('.info/connected').on('value', (snap) => {
+      updateSyncStatusIndicator(snap.val() ? 'live' : 'connecting');
+    });
+  } catch (e) {
+    console.error('Error inicializando la sincronización en tiempo real:', e);
+    updateSyncStatusIndicator('offline');
+  }
+}
+
+function pushStateToCloud() {
+  if (!firebaseDB) return;
+  firebaseDB.ref(CLOUD_STATE_PATH).set({
+    categoriesData: appState.categoriesData,
+    sponsors: appState.sponsors,
+    adminPin: appState.adminPin,
+    lastUpdated: Date.now()
+  }).catch(e => console.error('Error sincronizando con la nube:', e));
+}
+
+function updateSyncStatusIndicator(status) {
+  const el = document.getElementById('syncStatusBadge');
+  if (!el) return;
+
+  if (status === 'offline') {
+    el.innerHTML = '⚪ Sin sincronizar';
+    el.className = 'sync-status-badge sync-off';
+    el.title = 'Firebase no está configurado todavía. Editá firebase-config.js con tus datos reales para activar la sincronización en tiempo real entre dispositivos.';
+    console.warn('[Comu App] Sincronización en tiempo real DESACTIVADA: firebase-config.js todavía tiene los valores de ejemplo (TU_API_KEY, TU_PROYECTO...). Reemplazalos por los datos de tu propio proyecto de Firebase.');
+    return;
+  }
+
+  if (status === 'live') {
+    el.innerHTML = '🟢 Sincronizado en vivo';
+    el.className = 'sync-status-badge sync-live';
+    el.title = 'Conectado a la base de datos en tiempo real. Los cambios del administrador se ven al instante en todos los dispositivos.';
+  } else {
+    el.innerHTML = '🟡 Conectando…';
+    el.className = 'sync-status-badge sync-pending';
+    el.title = 'Estableciendo conexión con la base de datos en tiempo real...';
+  }
 }
 
 function generateDefaultTournamentState() {
@@ -431,7 +533,10 @@ function renderStandingsView() {
         <span>Tabla de Posiciones</span>
         <span class="badge">Categoría ${appState.currentCategory}</span>
       </div>
-      <button class="btn-primary" onclick="selectTab('cruces')">⚡ Ver Cruces y Final</button>
+      <div style="display:flex; gap:0.6rem; flex-wrap: wrap;">
+        ${appState.isAdmin ? `<button class="btn-secondary" onclick="openTeamsModal()">⚙️ Gestionar Equipos</button>` : ''}
+        <button class="btn-primary" onclick="selectTab('cruces')">⚡ Ver Cruces y Final</button>
+      </div>
     </div>
 
     <div class="table-card">
@@ -930,7 +1035,114 @@ function closePlayoffScoreModal() {
   document.getElementById('playoffScoreModal').classList.remove('open');
 }
 
-// Sponsor Admin Modal
+// Team Management Modal (Admin)
+function openTeamsModal() {
+  if (!appState.isAdmin) return openAdminPinModal();
+  document.getElementById('teamsModalCategoryLabel').textContent = appState.currentCategory;
+  renderTeamsModalList();
+  document.getElementById('newTeamNameInput').value = '';
+  document.getElementById('newTeamCrestInput').value = '';
+  document.getElementById('teamsModal').classList.add('open');
+}
+
+function closeTeamsModal() {
+  document.getElementById('teamsModal').classList.remove('open');
+}
+
+function renderTeamsModalList() {
+  const container = document.getElementById('teamsModalList');
+  if (!container) return;
+
+  const catData = appState.categoriesData[appState.currentCategory];
+  if (!catData || !catData.teams.length) {
+    container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No hay equipos cargados en esta categoría todavía.</p>';
+    return;
+  }
+
+  container.innerHTML = catData.teams.map(t => `
+    <div style="display:flex; align-items:center; gap:0.6rem; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0.6rem;">
+      <img src="${t.crest || GENERIC_TEAM_CREST}" alt="${t.name}" style="width:36px; height:36px; object-fit:contain; border-radius: 50%; background: rgba(255,255,255,0.05); flex-shrink:0;">
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:0.35rem;">
+        <input type="text" class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;" value="${(t.name || '').replace(/"/g, '&quot;')}" onchange="updateTeamName('${t.id}', this.value)" placeholder="Nombre del equipo">
+        <label style="font-size: 0.7rem; color: var(--text-muted); cursor: pointer;">
+          🖼️ Cambiar escudo (opcional)
+          <input type="file" accept="image/*" style="display:none;" onchange="updateTeamCrest('${t.id}', this)">
+        </label>
+      </div>
+      ${t.id === 'comu' ? '' : `<button class="close-btn" title="Quitar equipo" onclick="removeTeam('${t.id}')" style="flex-shrink:0;">&times;</button>`}
+    </div>
+  `).join('');
+}
+
+function updateTeamName(teamId, newName) {
+  const catData = appState.categoriesData[appState.currentCategory];
+  const team = catData.teams.find(t => t.id === teamId);
+  if (!team) return;
+  team.name = (newName || '').trim() || team.name;
+  saveState();
+  renderApp();
+}
+
+function updateTeamCrest(teamId, fileInput) {
+  if (!fileInput.files || !fileInput.files[0]) return;
+  const catData = appState.categoriesData[appState.currentCategory];
+  const team = catData.teams.find(t => t.id === teamId);
+  if (!team) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    team.crest = e.target.result;
+    saveState();
+    renderTeamsModalList();
+    renderApp();
+  };
+  reader.readAsDataURL(fileInput.files[0]);
+}
+
+function removeTeam(teamId) {
+  if (teamId === 'comu') return;
+  if (!confirm('¿Seguro que querés quitar este equipo? Sus partidos ya cargados van a quedar sin datos del equipo.')) return;
+
+  const catData = appState.categoriesData[appState.currentCategory];
+  catData.teams = catData.teams.filter(t => t.id !== teamId);
+  saveState();
+  renderTeamsModalList();
+  renderApp();
+}
+
+function addNewTeam() {
+  const nameInput = document.getElementById('newTeamNameInput');
+  const fileInput = document.getElementById('newTeamCrestInput');
+  const name = nameInput.value.trim();
+
+  if (!name) {
+    alert('Ingresá el nombre del equipo.');
+    return;
+  }
+
+  const catData = appState.categoriesData[appState.currentCategory];
+  const newId = 'team_' + Date.now();
+  const short = name.substring(0, 3).toUpperCase();
+
+  const createTeam = (crestUrl) => {
+    catData.teams.push({ id: newId, name: name, short: short, crest: crestUrl || GENERIC_TEAM_CREST });
+    saveState();
+    nameInput.value = '';
+    fileInput.value = '';
+    renderTeamsModalList();
+    renderApp();
+  };
+
+  if (fileInput.files && fileInput.files[0]) {
+    const reader = new FileReader();
+    reader.onload = function(e) { createTeam(e.target.result); };
+    reader.readAsDataURL(fileInput.files[0]);
+  } else {
+    createTeam(null);
+  }
+}
+
+
 function openAddSponsorModal() {
   if (!appState.isAdmin) return openAdminPinModal();
   document.getElementById('sponsorModal').classList.add('open');
@@ -1060,4 +1272,5 @@ if ('serviceWorker' in navigator) {
 document.addEventListener('DOMContentLoaded', () => {
   initData();
   renderApp();
+  initFirebaseSync();
 });
