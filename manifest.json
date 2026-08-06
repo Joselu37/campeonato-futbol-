@@ -9,8 +9,13 @@
   "theme_color": "#ffd700",
   "icons": [
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23111'/><path d='M50 10 L85 25 L85 60 C85 78 50 92 50 92 C50 92 15 78 15 60 L15 25 Z' fill='%23ffd700' stroke='%23000' stroke-width='3'/><text x='50' y='55' text-anchor='middle' font-family='sans-serif' font-weight='900' font-size='22' fill='%23000'>COMU</text></svg>",
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><clipPath id='crestOuter'><circle cx='50' cy='50' r='48'/></clipPath><clipPath id='crestRing'><path d='M 81.95,72.37 A 39,39 0 1 1 81.95,27.63 L 76.21,31.65 A 32,32 0 1 0 76.21,68.35 Z'/></clipPath><clipPath id='crestCore'><circle cx='50' cy='50' r='25'/></clipPath></defs><g clip-path='url(%23crestOuter)'><rect x='2' y='2' width='48' height='96' fill='%230a0a0a'/><rect x='50' y='2' width='48' height='96' fill='%23ffd700'/></g><circle cx='50' cy='50' r='46' fill='%23ffffff'/><g clip-path='url(%23crestRing)'><rect x='7' y='7' width='43' height='86' fill='%230a0a0a'/><rect x='50' y='7' width='43' height='86' fill='%23ffd700'/></g><circle cx='50' cy='50' r='32' fill='%23ffffff'/><g clip-path='url(%23crestCore)'><rect x='25' y='25' width='25' height='50' fill='%230a0a0a'/><rect x='50' y='25' width='25' height='50' fill='%23ffd700'/></g><circle cx='50' cy='50' r='48' fill='none' stroke='%230a0a0a' stroke-width='2'/></svg>",
       "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><clipPath id='crestOuter'><circle cx='50' cy='50' r='48'/></clipPath><clipPath id='crestRing'><path d='M 81.95,72.37 A 39,39 0 1 1 81.95,27.63 L 76.21,31.65 A 32,32 0 1 0 76.21,68.35 Z'/></clipPath><clipPath id='crestCore'><circle cx='50' cy='50' r='25'/></clipPath></defs><g clip-path='url(%23crestOuter)'><rect x='2' y='2' width='48' height='96' fill='%230a0a0a'/><rect x='50' y='2' width='48' height='96' fill='%23ffd700'/></g><circle cx='50' cy='50' r='46' fill='%23ffffff'/><g clip-path='url(%23crestRing)'><rect x='7' y='7' width='43' height='86' fill='%230a0a0a'/><rect x='50' y='7' width='43' height='86' fill='%23ffd700'/></g><circle cx='50' cy='50' r='32' fill='%23ffffff'/><g clip-path='url(%23crestCore)'><rect x='25' y='25' width='25' height='50' fill='%230a0a0a'/><rect x='50' y='25' width='25' height='50' fill='%23ffd700'/></g><circle cx='50' cy='50' r='48' fill='none' stroke='%230a0a0a' stroke-width='2'/></svg>",
+      "sizes": "512x512",
       "type": "image/svg+xml"
     }
   ]

@@ -1,10 +1,12 @@
-const CACHE_NAME = 'comu-torneo-v4-force';
+const CACHE_NAME = 'comu-torneo-v6-teams-crest';
 const ASSETS = [
   './',
-  './index.html?v=4',
-  './styles.css?v=4',
-  './app.js?v=4',
-  './manifest.json'
+  './index.html?v=6',
+  './styles.css?v=6',
+  './app.js?v=6',
+  './manifest.json',
+  './favicon.svg',
+  './firebase-config.js'
 ];
 
 self.addEventListener('install', (e) => {

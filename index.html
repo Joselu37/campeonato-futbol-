@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
   <title>Campeonato Infantil - Club Atlético Comunicaciones de Mercedes (Corrientes)</title>
   
   <!-- SEO & PWA Meta Tags -->
@@ -11,7 +11,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" type="image/svg+xml" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="apple-touch-icon" href="favicon.svg">
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,18 +28,28 @@
   <header class="header-hero">
     <div class="brand-container">
       <div class="club-identity">
-        <!-- Official Crest: Club Atlético Comunicaciones de Mercedes Corrientes -->
-        <svg class="club-badge" viewBox="0 0 120 140">
-          <g>
-            <path d="M60 5 L112 25 L112 75 C112 105 60 135 60 135 C60 135 8 105 8 75 L8 25 Z" fill="#ffd700" stroke="#000000" stroke-width="6"/>
-            <path d="M8 25 L112 25 L112 48 L8 48 Z" fill="#000000"/>
-            <text x="60" y="41" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="13" fill="#ffd700" letter-spacing="1">COMUNICACIONES</text>
-            <rect x="22" y="48" width="15" height="68" fill="#000000"/>
-            <rect x="52.5" y="48" width="15" height="75" fill="#000000"/>
-            <rect x="83" y="48" width="15" height="68" fill="#000000"/>
-            <path d="M20 70 L100 70 L100 95 L20 95 Z" fill="#ffd700" stroke="#000000" stroke-width="3"/>
-            <text x="60" y="88" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="14" fill="#000000">MERCEDES</text>
+        <!-- Escudo Oficial: Club Atlético Comunicaciones de Mercedes (Corrientes) -->
+        <svg class="club-badge" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <clipPath id="crestOuter"><circle cx="50" cy="50" r="48"/></clipPath>
+            <clipPath id="crestRing"><path d="M 81.95,72.37 A 39,39 0 1 1 81.95,27.63 L 76.21,31.65 A 32,32 0 1 0 76.21,68.35 Z"/></clipPath>
+            <clipPath id="crestCore"><circle cx="50" cy="50" r="25"/></clipPath>
+          </defs>
+          <g clip-path="url(#crestOuter)">
+            <rect x="2" y="2" width="48" height="96" fill="#0a0a0a"/>
+            <rect x="50" y="2" width="48" height="96" fill="#ffd700"/>
           </g>
+          <circle cx="50" cy="50" r="46" fill="#ffffff"/>
+          <g clip-path="url(#crestRing)">
+            <rect x="7" y="7" width="43" height="86" fill="#0a0a0a"/>
+            <rect x="50" y="7" width="43" height="86" fill="#ffd700"/>
+          </g>
+          <circle cx="50" cy="50" r="32" fill="#ffffff"/>
+          <g clip-path="url(#crestCore)">
+            <rect x="25" y="25" width="25" height="50" fill="#0a0a0a"/>
+            <rect x="50" y="25" width="25" height="50" fill="#ffd700"/>
+          </g>
+          <circle cx="50" cy="50" r="48" fill="none" stroke="#0a0a0a" stroke-width="2"/>
         </svg>
 
         <div class="title-box">
@@ -48,6 +59,7 @@
       </div>
 
       <div class="header-actions">
+        <span id="syncStatusBadge" class="sync-status-badge" title="Estado de la sincronización en tiempo real"></span>
         <div id="adminHeaderBtn">
           <!-- Universal Admin Button populated by app.js for Android/iOS/PC -->
         </div>
@@ -237,6 +249,40 @@
     </div>
   </div>
 
+  <!-- Team Management Modal (Admin) -->
+  <div class="modal-overlay" id="teamsModal">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <span class="modal-title">⚙️ Gestionar Equipos — Cat. <span id="teamsModalCategoryLabel"></span></span>
+        <button class="close-btn" onclick="closeTeamsModal()">&times;</button>
+      </div>
+
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Cambiá el nombre, el escudo o eliminá un equipo. El escudo es opcional: si no cargás uno, se muestra un ícono genérico.
+      </p>
+
+      <div id="teamsModalList" style="display: flex; flex-direction: column; gap: 0.75rem; max-height: 340px; overflow-y: auto; margin-bottom: 1.25rem; padding-right: 0.25rem;">
+        <!-- Generado por app.js -->
+      </div>
+
+      <div style="border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+        <label style="display:block; margin-bottom: 0.5rem; font-weight: 700; font-size: 0.85rem;">Agregar Nuevo Equipo</label>
+        <div class="form-group" style="margin-bottom: 0.6rem;">
+          <input type="text" id="newTeamNameInput" class="form-input" placeholder="Nombre del equipo (obligatorio)">
+        </div>
+        <div class="form-group" style="margin-bottom: 0.6rem;">
+          <label style="font-size: 0.75rem; color: var(--text-muted);">Escudo del equipo (opcional)</label>
+          <input type="file" id="newTeamCrestInput" class="form-input" accept="image/*">
+        </div>
+        <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="addNewTeam()">+ Agregar Equipo</button>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+        <button class="btn-secondary" style="flex: 1; justify-content: center;" onclick="closeTeamsModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Footer -->
   <footer class="footer-hero">
     <div class="footer-content">
@@ -248,6 +294,11 @@
       </p>
     </div>
   </footer>
+
+  <!-- Sincronización en Tiempo Real (Firebase Realtime Database) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
 
   <!-- App Script -->
   <script src="app.js"></script>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <clipPath id="crestOuter"><circle cx="50" cy="50" r="48"/></clipPath>
+    <clipPath id="crestRing"><path d="M 81.95,72.37 A 39,39 0 1 1 81.95,27.63 L 76.21,31.65 A 32,32 0 1 0 76.21,68.35 Z"/></clipPath>
+    <clipPath id="crestCore"><circle cx="50" cy="50" r="25"/></clipPath>
+  </defs>
+  <g clip-path="url(#crestOuter)">
+    <rect x="2" y="2" width="48" height="96" fill="#0a0a0a"/>
+    <rect x="50" y="2" width="48" height="96" fill="#ffd700"/>
+  </g>
+  <circle cx="50" cy="50" r="46" fill="#ffffff"/>
+  <g clip-path="url(#crestRing)">
+    <rect x="7" y="7" width="43" height="86" fill="#0a0a0a"/>
+    <rect x="50" y="7" width="43" height="86" fill="#ffd700"/>
+  </g>
+  <circle cx="50" cy="50" r="32" fill="#ffffff"/>
+  <g clip-path="url(#crestCore)">
+    <rect x="25" y="25" width="25" height="50" fill="#0a0a0a"/>
+    <rect x="50" y="25" width="25" height="50" fill="#ffd700"/>
+  </g>
+  <circle cx="50" cy="50" r="48" fill="none" stroke="#0a0a0a" stroke-width="2"/>
+</svg>
