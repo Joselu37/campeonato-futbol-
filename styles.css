@@ -1,5 +1,5 @@
 /* ==========================================================================
-   CAMPEONATO DE FÚTBOL INFANTIL - CLUB SOCIAL Y DEPORTIVO COMUNICACIONES (MERCEDES)
+   CAMPEONATO DE FÚTBOL INFANTIL - CLUB ATLÉTICO COMUNICACIONES (MERCEDES)
    Aesthetic: Aurinegro (Gold & Deep Black) | Sleek Sports UI (v3.0)
    ========================================================================== */
 
@@ -42,12 +42,6 @@
   padding: 0;
   font-family: 'Outfit', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-tap-highlight-color: transparent;
-}
-
-input, textarea, select {
-  -webkit-user-select: text;
-  user-select: text;
-  -webkit-touch-callout: default;
 }
 
 body {
@@ -153,45 +147,6 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-}
-
-.sync-status-badge {
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  display: none;
-}
-
-.sync-status-badge:not(:empty) {
-  display: inline-flex;
-  align-items: center;
-}
-
-.sync-status-badge.sync-live {
-  background: rgba(34, 197, 94, 0.12);
-  color: #4ade80;
-  border: 1px solid rgba(34, 197, 94, 0.35);
-}
-
-.sync-status-badge.sync-pending {
-  background: rgba(234, 179, 8, 0.12);
-  color: #facc15;
-  border: 1px solid rgba(234, 179, 8, 0.35);
-  animation: syncPulse 1.4s ease-in-out infinite;
-}
-
-.sync-status-badge.sync-off {
-  background: rgba(148, 163, 184, 0.1);
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-}
-
-@keyframes syncPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
 }
 
 /* Sponsor Marquee Bar */
@@ -1046,3 +1001,192 @@ body {
     padding: 0.55rem 0.5rem;
   }
 }
+
+/* ==========================================================================
+   FORMAT SWITCHER, GROUPS A/B/C, COPA ORO/PLATA & DRAW ANIMATIONS
+   ========================================================================== */
+
+/* Format Selector Banner */
+.format-banner {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.1) 0%, rgba(19, 23, 32, 0.9) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.25rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.format-badge {
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.format-badge.groups {
+  background: rgba(255, 215, 0, 0.2);
+  color: var(--primary-gold);
+  border: 1px solid var(--primary-gold);
+}
+.format-badge.general {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid #3b82f6;
+}
+
+/* Group Badges */
+.group-badge-A {
+  background: linear-gradient(135deg, #ffd700 0%, #b8860b 100%);
+  color: #000;
+  font-weight: 900;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-full);
+}
+.group-badge-B {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  color: #fff;
+  font-weight: 900;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-full);
+}
+.group-badge-C {
+  background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
+  color: #fff;
+  font-weight: 900;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-full);
+}
+
+/* Copa Oro & Copa Plata Titles */
+.cup-header-oro {
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.2) 0%, rgba(0,0,0,0.5) 100%);
+  border-left: 4px solid var(--primary-gold);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  color: var(--primary-gold);
+  font-weight: 900;
+  font-size: 1.1rem;
+  margin: 1.5rem 0 1rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cup-header-plata {
+  background: linear-gradient(90deg, rgba(156, 163, 175, 0.2) 0%, rgba(0,0,0,0.5) 100%);
+  border-left: 4px solid #9ca3af;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  color: #e5e7eb;
+  font-weight: 900;
+  font-size: 1.1rem;
+  margin: 2rem 0 1rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Sorteo Animation & Cards */
+.draw-bowl-box {
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px dashed var(--primary-gold);
+  border-radius: var(--radius-md);
+  padding: 2rem 1rem;
+  margin: 1rem 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.draw-ball-spinning {
+  width: 70px;
+  height: 70px;
+  background: radial-gradient(circle at 30% 30%, #ffffff, #ffd700 60%, #997a00 100%);
+  border-radius: 50%;
+  margin: 0 auto 1rem auto;
+  box-shadow: 0 0 25px var(--gold-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  animation: bounceBall 0.8s infinite alternate ease-in-out;
+}
+
+@keyframes bounceBall {
+  0% { transform: translateY(0) rotate(0deg); }
+  100% { transform: translateY(-15px) rotate(180deg); }
+}
+
+.draw-revealed-card {
+  background: var(--bg-card);
+  border: 2px solid var(--primary-gold);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 0 30px rgba(255, 215, 0, 0.3);
+  animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.6); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Groups Layout Grid */
+.groups-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.group-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  box-shadow: var(--shadow-lg);
+}
+
+/* General Ranking Table (Qualified Highlights) */
+.tr-qualify-oro {
+  background: rgba(255, 215, 0, 0.12) !important;
+}
+.tr-qualify-tercero {
+  background: rgba(59, 130, 246, 0.12) !important;
+}
+
+/* Team Management Grid */
+.teams-manage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.team-manage-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: center;
+  position: relative;
+  transition: var(--transition);
+}
+
+.team-manage-card:hover {
+  border-color: var(--primary-gold);
+  transform: translateY(-2px);
+}
+
