@@ -1,8 +1,17 @@
 /* ==========================================================================
-   CAMPEONATO DE FÚTBOL INFANTIL - APP CORE LOGIC (v5.0 Definitiva)
+   CAMPEONATO DE FÚTBOL INFANTIL - APP CORE LOGIC (v5.2 Definitiva)
    Club Atlético Comunicaciones de Mercedes (Corrientes)
    Categorías: 2015, 2016, 2017, 2018, 2019
    ========================================================================== */
+
+// Unregister stale service workers immediately to prevent cached blank responses
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    for (let registration of registrations) {
+      registration.unregister();
+    }
+  }).catch(() => {});
+}
 
 // Escudo Oficial Aurinegro de Club Atlético Comunicaciones de Mercedes (Corrientes)
 const OFFICIAL_COMU_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 140'><g><path d='M60 5 L112 25 L112 75 C112 105 60 135 60 135 C60 135 8 105 8 75 L8 25 Z' fill='%23ffd700' stroke='%23000000' stroke-width='6'/><path d='M8 25 L112 25 L112 48 L8 48 Z' fill='%23000000'/><text x='60' y='41' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='13' fill='%23ffd700' letter-spacing='1'>COMUNICACIONES</text><rect x='22' y='48' width='15' height='68' fill='%23000000'/><rect x='52.5' y='48' width='15' height='75' fill='%23000000'/><rect x='83' y='48' width='15' height='68' fill='%23000000'/><path d='M20 70 L100 70 L100 95 L20 95 Z' fill='%23ffd700' stroke='%23000000' stroke-width='3'/><text x='60' y='88' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='14' fill='%23000000'>MERCEDES</text></g></svg>`;
@@ -87,32 +96,115 @@ let appState = {
   adminPin: 'comu2026'
 };
 
-// Initialize App Data
+// Initialize App Data & Migration Safety
 function initData() {
-  const savedData = localStorage.getItem('comu_torneo_app_state_v5');
-  if (savedData) {
-    try {
+  try {
+    const savedData = localStorage.getItem('comu_torneo_app_state_v5');
+    if (savedData) {
       const parsed = JSON.parse(savedData);
-      appState = { ...appState, ...parsed };
-      appState.sponsors = DEFAULT_SPONSORS;
-    } catch (e) {
-      console.error('Error loading stored state:', e);
-      generateDefaultTournamentState();
+      if (parsed && parsed.categoriesData) {
+        appState.currentCategory = parsed.currentCategory || '2015';
+        appState.currentTab = parsed.currentTab || 'fixture';
+        appState.isAdmin = !!parsed.isAdmin;
+        appState.adminPin = parsed.adminPin || 'comu2026';
+        appState.categoriesData = parsed.categoriesData;
+
+        // Repair any category data structure if needed
+        CATEGORIES.forEach(cat => {
+          let catData = appState.categoriesData[cat];
+          if (!catData) {
+            catData = {
+              format: 'groups_cup',
+              teams: JSON.parse(JSON.stringify(DEFAULT_12_TEAMS)),
+              groups: { A: [], B: [], C: [] },
+              fixtures: [],
+              playoffs: createEmptyPlayoffsObj()
+            };
+            appState.categoriesData[cat] = catData;
+            executeGroupDrawBackend(cat, false);
+          } else {
+            if (!catData.format) catData.format = 'groups_cup';
+            if (!catData.teams || !Array.isArray(catData.teams) || catData.teams.length === 0) {
+              catData.teams = JSON.parse(JSON.stringify(DEFAULT_12_TEAMS));
+            }
+            if (!catData.groups || !catData.groups.A || catData.groups.A.length === 0) {
+              catData.groups = { A: [], B: [], C: [] };
+              executeGroupDrawBackend(cat, false);
+            }
+            if (!catData.fixtures || !Array.isArray(catData.fixtures) || catData.fixtures.length === 0) {
+              catData.fixtures = generateGroupsFixtures(catData.groups, cat);
+            }
+            if (!catData.playoffs || !catData.playoffs.initialCruces) {
+              catData.playoffs = createEmptyPlayoffsObj();
+            }
+          }
+        });
+
+        appState.sponsors = DEFAULT_SPONSORS;
+        saveState();
+        return;
+      }
     }
-  } else {
-    generateDefaultTournamentState();
+  } catch (e) {
+    console.error('Error loading stored state, performing clean reset:', e);
   }
+
+  // Fallback: Clear corrupted state and generate clean state
+  try {
+    localStorage.removeItem('comu_torneo_app_state_v4');
+    localStorage.removeItem('comu_torneo_app_state_v5');
+  } catch (e) {}
+
+  generateDefaultTournamentState();
 }
 
 function saveState() {
-  const dataToSave = {
-    currentCategory: appState.currentCategory,
-    currentTab: appState.currentTab,
-    categoriesData: appState.categoriesData,
-    sponsors: appState.sponsors,
-    adminPin: appState.adminPin
-  };
-  localStorage.setItem('comu_torneo_app_state_v5', JSON.stringify(dataToSave));
+  try {
+    const dataToSave = {
+      currentCategory: appState.currentCategory,
+      currentTab: appState.currentTab,
+      categoriesData: appState.categoriesData,
+      sponsors: appState.sponsors,
+      adminPin: appState.adminPin
+    };
+    localStorage.setItem('comu_torneo_app_state_v5', JSON.stringify(dataToSave));
+  } catch (e) {
+    console.error('Error saving state to localStorage:', e);
+    if (e && e.name === 'QuotaExceededError') {
+      alert('No se pudo guardar: se llenó el espacio de almacenamiento (demasiadas fotos/escudos pesados). Los últimos cambios NO se guardaron. Borrá algún escudo o logo de sponsor pesado desde el panel de admin, o subí imágenes más livianas.');
+    }
+  }
+}
+
+// Comprime y redimensiona una imagen antes de convertirla a base64,
+// para evitar llenar el localStorage con fotos pesadas sin procesar.
+function resizeImageToDataURL(file, maxDim = 220, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height) {
+          if (width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+        } else {
+          if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('No se pudo procesar la imagen.'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function generateDefaultTournamentState() {
@@ -120,7 +212,7 @@ function generateDefaultTournamentState() {
   CATEGORIES.forEach(cat => {
     const teams = JSON.parse(JSON.stringify(DEFAULT_12_TEAMS));
     appState.categoriesData[cat] = {
-      format: 'groups_cup', // 'groups_cup' (Sorteo 3 grupos) or 'general_table' (Tabla Única)
+      format: 'groups_cup',
       teams: teams,
       groups: { A: [], B: [], C: [] },
       fixtures: [],
@@ -175,7 +267,7 @@ function switchCategoryFormat(catYear, newFormat) {
     catData.playoffs = createEmptyPlayoffsObj();
   }
   saveState();
-  renderApp();
+  safeRenderApp();
 }
 
 function executeGroupDrawBackend(catYear, resetScores = true) {
@@ -204,7 +296,7 @@ function generateGroupsFixtures(groups, catYear) {
   const allJornadas = [];
 
   ['A', 'B', 'C'].forEach(grpKey => {
-    const teamIds = groups[grpKey];
+    const teamIds = (groups && groups[grpKey]) ? groups[grpKey] : [];
     if (teamIds.length < 2) return;
 
     for (let r = 0; r < teamIds.length - 1; r++) {
@@ -241,16 +333,17 @@ function generateGroupsFixtures(groups, catYear) {
     }
   });
 
-  return allJornadas.filter(j => j && j.matches.length > 0);
+  return allJornadas.filter(j => j && j.matches && j.matches.length > 0);
 }
 
 function generateSingleTableFixture(teams, catYear) {
   const rounds = [];
-  for (let i = 0; i < Math.min(3, teams.length - 1); i++) {
+  const teamList = teams || [];
+  for (let i = 0; i < Math.min(3, teamList.length - 1); i++) {
     const matches = [];
-    for (let j = 0; j < Math.floor(teams.length / 2); j++) {
-      const home = teams[j];
-      const away = teams[teams.length - 1 - j];
+    for (let j = 0; j < Math.floor(teamList.length / 2); j++) {
+      const home = teamList[j];
+      const away = teamList[teamList.length - 1 - j];
       if (home && away) {
         matches.push({
           id: `m_${catYear}_gen_j${i + 1}_${j}`,
@@ -276,10 +369,10 @@ function generateSingleTableFixture(teams, catYear) {
 // --------------------------------------------------------------------------
 
 function calculateGroupStandings(category, groupLetter) {
-  const catData = appState.categoriesData[category];
+  const catData = appState.categoriesData ? appState.categoriesData[category] : null;
   if (!catData) return [];
 
-  const groupTeamIds = catData.groups[groupLetter] || [];
+  const groupTeamIds = (catData.groups && catData.groups[groupLetter]) ? catData.groups[groupLetter] : [];
   const stats = {};
 
   groupTeamIds.forEach(teamId => {
@@ -291,8 +384,8 @@ function calculateGroupStandings(category, groupLetter) {
     };
   });
 
-  catData.fixtures.forEach(round => {
-    round.matches.forEach(m => {
+  (catData.fixtures || []).forEach(round => {
+    (round.matches || []).forEach(m => {
       if (m.group === groupLetter && m.status === 'finished' && m.homeScore !== null && m.awayScore !== null) {
         const home = stats[m.home];
         const away = stats[m.away];
@@ -320,16 +413,17 @@ function calculateGroupStandings(category, groupLetter) {
 }
 
 function sortTeamsComparator(a, b) {
-  if (b.pts !== a.pts) return b.pts - a.pts;
-  if (b.dg !== a.dg) return b.dg - a.dg;
-  if (b.gf !== a.gf) return b.gf - a.gf;
-  return a.name.localeCompare(b.name);
+  if (!a || !b) return 0;
+  if (b.pts !== a.pts) return (b.pts || 0) - (a.pts || 0);
+  if (b.dg !== a.dg) return (b.dg || 0) - (a.dg || 0);
+  if (b.gf !== a.gf) return (b.gf || 0) - (a.gf || 0);
+  return (a.name || '').localeCompare(b.name || '');
 }
 
 function calculateQualifiedTeamsRanking(category) {
-  const tableA = calculateGroupStandings(category, 'A');
-  const tableB = calculateGroupStandings(category, 'B');
-  const tableC = calculateGroupStandings(category, 'C');
+  const tableA = calculateGroupStandings(category, 'A') || [];
+  const tableB = calculateGroupStandings(category, 'B') || [];
+  const tableC = calculateGroupStandings(category, 'C') || [];
 
   const primeros = [tableA[0], tableB[0], tableC[0]].filter(Boolean).sort(sortTeamsComparator);
   const segundos = [tableA[1], tableB[1], tableC[1]].filter(Boolean).sort(sortTeamsComparator);
@@ -352,16 +446,16 @@ function calculateQualifiedTeamsRanking(category) {
 }
 
 function calculateSingleStandings(category) {
-  const catData = appState.categoriesData[category];
+  const catData = appState.categoriesData ? appState.categoriesData[category] : null;
   if (!catData) return [];
 
   const stats = {};
-  catData.teams.forEach(t => {
+  (catData.teams || []).forEach(t => {
     stats[t.id] = { ...t, pts: 0, pj: 0, pg: 0, pe: 0, pp: 0, gf: 0, gc: 0, dg: 0 };
   });
 
-  catData.fixtures.forEach(round => {
-    round.matches.forEach(m => {
+  (catData.fixtures || []).forEach(round => {
+    (round.matches || []).forEach(m => {
       if (m.status === 'finished' && m.homeScore !== null && m.awayScore !== null) {
         const home = stats[m.home];
         const away = stats[m.away];
@@ -389,8 +483,18 @@ function calculateSingleStandings(category) {
 }
 
 // --------------------------------------------------------------------------
-// RENDER VIEWS
+// RENDER VIEWS WITH SAFE ERROR HANDLING
 // --------------------------------------------------------------------------
+
+function safeRenderApp() {
+  try {
+    renderApp();
+  } catch (err) {
+    console.error('Render error encountered, auto-healing state:', err);
+    generateDefaultTournamentState();
+    renderApp();
+  }
+}
 
 function renderApp() {
   renderAdminHeaderStatus();
@@ -430,7 +534,7 @@ function renderCategoryPills() {
 }
 
 function renderTabButtons() {
-  const catData = appState.categoriesData[appState.currentCategory];
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
   const isGroups = catData && catData.format === 'groups_cup';
 
   const tabs = [
@@ -454,7 +558,7 @@ function renderTabButtons() {
 function renderMarqueeSponsors() {
   const track = document.getElementById('sponsorMarqueeTrack');
   if (!track) return;
-  const list = [...appState.sponsors, ...appState.sponsors];
+  const list = [...(appState.sponsors || DEFAULT_SPONSORS), ...(appState.sponsors || DEFAULT_SPONSORS)];
   track.innerHTML = list.map(sp => `
     <a href="${sp.url && sp.url !== '#' ? sp.url : 'javascript:void(0)'}" target="${sp.url && sp.url !== '#' ? '_blank' : '_self'}" class="sponsor-item-mini" rel="noopener">
       <img src="${sp.logo}" alt="${sp.name}" title="${sp.name}">
@@ -465,7 +569,8 @@ function renderMarqueeSponsors() {
 function renderFooterSponsors() {
   const container = document.getElementById('footerSponsorsGrid');
   if (!container) return;
-  container.innerHTML = appState.sponsors.map(sp => `
+  const list = appState.sponsors || DEFAULT_SPONSORS;
+  container.innerHTML = list.map(sp => `
     <a href="${sp.url && sp.url !== '#' ? sp.url : 'javascript:void(0)'}" target="${sp.url && sp.url !== '#' ? '_blank' : '_self'}" title="${sp.name}" rel="noopener">
       <img src="${sp.logo}" alt="${sp.name}" class="footer-sponsor-img">
     </a>
@@ -495,6 +600,8 @@ function renderMainContent() {
     case 'app':
       container.innerHTML = renderAppDownloadView();
       break;
+    default:
+      container.innerHTML = renderFixtureView();
   }
 }
 
@@ -503,10 +610,11 @@ function renderMainContent() {
 // --------------------------------------------------------------------------
 
 function renderFixtureView() {
-  const catData = appState.categoriesData[appState.currentCategory];
-  if (!catData) return '<p>No hay datos cargados.</p>';
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return '<p style="padding:2rem; text-align:center; color:var(--text-muted);">No hay datos cargados para esta categoría.</p>';
 
   const isGroups = catData.format === 'groups_cup';
+  const fixtures = catData.fixtures || [];
 
   return `
     <div class="format-banner">
@@ -537,13 +645,20 @@ function renderFixtureView() {
       </div>
     </div>
 
-    ${catData.fixtures.map((jornada) => `
+    ${fixtures.length === 0 ? `
+      <div style="background: var(--bg-card); padding: 2rem; text-align: center; border-radius: 12px; margin-top: 1rem; border: 1px dashed var(--border-color);">
+        <p style="color: var(--primary-gold); font-weight: 700;">No hay partidos generados aún.</p>
+        ${appState.isAdmin ? `
+          <button class="btn-primary" style="margin-top: 1rem;" onclick="startInteractiveGroupDraw()">🎲 Realizar Sorteo de Grupos</button>
+        ` : ''}
+      </div>
+    ` : fixtures.map((jornada) => `
       <div class="jornada-controls" style="margin-top: 1.5rem;">
         <span class="jornada-title">Jornada ${jornada.jornadaNumber}</span>
       </div>
 
       <div class="matches-grid">
-        ${jornada.matches.map(m => {
+        ${(jornada.matches || []).map(m => {
           const homeTeam = getTeamObj(m.home);
           const awayTeam = getTeamObj(m.away);
           const isComuMatch = homeTeam.id === 'comu' || awayTeam.id === 'comu';
@@ -570,9 +685,9 @@ function renderFixtureView() {
                 </div>
 
                 <div class="score-display">
-                  <span class="score-num">${m.homeScore !== null ? m.homeScore : '-'}</span>
+                  <span class="score-num">${m.homeScore !== null && m.homeScore !== undefined ? m.homeScore : '-'}</span>
                   <span class="score-divider">:</span>
-                  <span class="score-num">${m.awayScore !== null ? m.awayScore : '-'}</span>
+                  <span class="score-num">${m.awayScore !== null && m.awayScore !== undefined ? m.awayScore : '-'}</span>
                 </div>
 
                 <div class="team-box">
@@ -600,8 +715,8 @@ function renderFixtureView() {
 // --------------------------------------------------------------------------
 
 function renderStandingsView() {
-  const catData = appState.categoriesData[appState.currentCategory];
-  if (!catData) return '';
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return '<p style="padding:2rem; text-align:center;">No hay datos de posiciones.</p>';
 
   const isGroups = catData.format === 'groups_cup';
 
@@ -682,7 +797,7 @@ function renderStandingsView() {
             </tr>
           </thead>
           <tbody>
-            ${ranking.qualifiedList.map((item, idx) => {
+            ${(ranking.qualifiedList || []).map((item, idx) => {
               const t = item.team;
               if (!t) return `<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">${item.rankLabel}: Por definir</td></tr>`;
               const isTercero = idx >= 6;
@@ -769,7 +884,7 @@ function renderStandingsTableMarkup(standings, title) {
             </tr>
           </thead>
           <tbody>
-            ${standings.map((t, idx) => `
+            ${(standings || []).map((t, idx) => `
               <tr style="${t.id === 'comu' ? 'background: rgba(255, 215, 0, 0.08); font-weight: bold;' : ''}">
                 <td class="team-cell">
                   <span class="pos-badge ${idx === 0 ? 'pos-1' : (idx === 1 ? 'pos-2' : (idx === 2 ? 'pos-3' : ''))}">${idx + 1}</span>
@@ -798,8 +913,8 @@ function renderStandingsTableMarkup(standings, title) {
 // --------------------------------------------------------------------------
 
 function renderCrucesView() {
-  const catData = appState.categoriesData[appState.currentCategory];
-  if (!catData) return '';
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return '<p style="padding:2rem; text-align:center;">No hay datos de cruces.</p>';
 
   const isGroups = catData.format === 'groups_cup';
 
@@ -808,28 +923,31 @@ function renderCrucesView() {
   }
 
   const ranking = calculateQualifiedTeamsRanking(appState.currentCategory);
-  const playoffs = catData.playoffs;
+  const playoffs = catData.playoffs || createEmptyPlayoffsObj();
+  catData.playoffs = playoffs;
 
-  const p1_1 = ranking.qualifiedList[0].team;
-  const p1_2 = ranking.qualifiedList[1].team;
-  const p1_3 = ranking.qualifiedList[2].team;
-  const p2_1 = ranking.qualifiedList[3].team;
-  const p2_2 = ranking.qualifiedList[4].team;
-  const p2_3 = ranking.qualifiedList[5].team;
-  const p3_1 = ranking.qualifiedList[6].team;
-  const p3_2 = ranking.qualifiedList[7].team;
+  const p1_1 = ranking.qualifiedList[0] ? ranking.qualifiedList[0].team : null;
+  const p1_2 = ranking.qualifiedList[1] ? ranking.qualifiedList[1].team : null;
+  const p1_3 = ranking.qualifiedList[2] ? ranking.qualifiedList[2].team : null;
+  const p2_1 = ranking.qualifiedList[3] ? ranking.qualifiedList[3].team : null;
+  const p2_2 = ranking.qualifiedList[4] ? ranking.qualifiedList[4].team : null;
+  const p2_3 = ranking.qualifiedList[5] ? ranking.qualifiedList[5].team : null;
+  const p3_1 = ranking.qualifiedList[6] ? ranking.qualifiedList[6].team : null;
+  const p3_2 = ranking.qualifiedList[7] ? ranking.qualifiedList[7].team : null;
 
-  playoffs.initialCruces[0].home = playoffs.initialCruces[0].home || (p1_1 ? p1_1.id : null);
-  playoffs.initialCruces[0].away = playoffs.initialCruces[0].away || (p3_2 ? p3_2.id : null);
+  if (playoffs.initialCruces && playoffs.initialCruces.length >= 4) {
+    playoffs.initialCruces[0].home = playoffs.initialCruces[0].home || (p1_1 ? p1_1.id : null);
+    playoffs.initialCruces[0].away = playoffs.initialCruces[0].away || (p3_2 ? p3_2.id : null);
 
-  playoffs.initialCruces[1].home = playoffs.initialCruces[1].home || (p1_2 ? p1_2.id : null);
-  playoffs.initialCruces[1].away = playoffs.initialCruces[1].away || (p3_1 ? p3_1.id : null);
+    playoffs.initialCruces[1].home = playoffs.initialCruces[1].home || (p1_2 ? p1_2.id : null);
+    playoffs.initialCruces[1].away = playoffs.initialCruces[1].away || (p3_1 ? p3_1.id : null);
 
-  playoffs.initialCruces[2].home = playoffs.initialCruces[2].home || (p1_3 ? p1_3.id : null);
-  playoffs.initialCruces[2].away = playoffs.initialCruces[2].away || (p2_3 ? p2_3.id : null);
+    playoffs.initialCruces[2].home = playoffs.initialCruces[2].home || (p1_3 ? p1_3.id : null);
+    playoffs.initialCruces[2].away = playoffs.initialCruces[2].away || (p2_3 ? p2_3.id : null);
 
-  playoffs.initialCruces[3].home = playoffs.initialCruces[3].home || (p2_1 ? p2_1.id : null);
-  playoffs.initialCruces[3].away = playoffs.initialCruces[3].away || (p2_2 ? p2_2.id : null);
+    playoffs.initialCruces[3].home = playoffs.initialCruces[3].home || (p2_1 ? p2_1.id : null);
+    playoffs.initialCruces[3].away = playoffs.initialCruces[3].away || (p2_2 ? p2_2.id : null);
+  }
 
   return `
     <div class="section-title">
@@ -848,7 +966,7 @@ function renderCrucesView() {
       </p>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
-        ${playoffs.initialCruces.map((m, idx) => renderBracketMatchCard(m, `cruce_${idx}`, m.label)).join('')}
+        ${(playoffs.initialCruces || []).map((m, idx) => renderBracketMatchCard(m, `cruce_${idx}`, m.label)).join('')}
       </div>
     </div>
 
@@ -864,7 +982,7 @@ function renderCrucesView() {
     <div class="bracket-container">
       <div class="bracket-round">
         <div class="round-header" style="border-color: var(--primary-gold); color: var(--primary-gold);">Semifinales Copa de Oro</div>
-        ${playoffs.oroSemis.map((m, idx) => renderBracketMatchCard(m, `oro_semi_${idx}`, `Semi Oro ${idx + 1}`)).join('')}
+        ${(playoffs.oroSemis || []).map((m, idx) => renderBracketMatchCard(m, `oro_semi_${idx}`, `Semi Oro ${idx + 1}`)).join('')}
       </div>
 
       <div class="bracket-round">
@@ -896,7 +1014,7 @@ function renderCrucesView() {
     <div class="bracket-container">
       <div class="bracket-round">
         <div class="round-header" style="border-color: #9ca3af; color: #e5e7eb;">Semifinales Copa de Plata</div>
-        ${playoffs.plataSemis.map((m, idx) => renderBracketMatchCard(m, `plata_semi_${idx}`, `Semi Plata ${idx + 1}`)).join('')}
+        ${(playoffs.plataSemis || []).map((m, idx) => renderBracketMatchCard(m, `plata_semi_${idx}`, `Semi Plata ${idx + 1}`)).join('')}
       </div>
 
       <div class="bracket-round">
@@ -919,8 +1037,8 @@ function renderCrucesView() {
 }
 
 function renderCrucesSingleTableMarkup() {
-  const catData = appState.categoriesData[appState.currentCategory];
-  const playoffs = catData.playoffs;
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  const playoffs = catData ? catData.playoffs || createEmptyPlayoffsObj() : createEmptyPlayoffsObj();
 
   return `
     <div class="section-title">
@@ -939,7 +1057,7 @@ function renderCrucesSingleTableMarkup() {
     <div class="bracket-container" style="margin-top: 1.5rem;">
       <div class="bracket-round">
         <div class="round-header">Semifinales</div>
-        ${playoffs.oroSemis.map((m, idx) => renderBracketMatchCard(m, `oro_semi_${idx}`, `Semi ${idx + 1}`)).join('')}
+        ${(playoffs.oroSemis || []).map((m, idx) => renderBracketMatchCard(m, `oro_semi_${idx}`, `Semi ${idx + 1}`)).join('')}
       </div>
 
       <div class="bracket-round">
@@ -951,6 +1069,7 @@ function renderCrucesSingleTableMarkup() {
 }
 
 function renderBracketMatchCard(m, matchTypeKey, titleLabel) {
+  if (!m) return '';
   const home = getTeamObj(m.home);
   const away = getTeamObj(m.away);
 
@@ -966,7 +1085,7 @@ function renderBracketMatchCard(m, matchTypeKey, titleLabel) {
           <img src="${home.crest}" style="width: 24px; height: 24px; object-fit: contain;">
           <span style="font-weight: 700;">${home.name}</span>
         </div>
-        <span class="bracket-score">${m.homeScore !== null ? m.homeScore : '-'}</span>
+        <span class="bracket-score">${m.homeScore !== null && m.homeScore !== undefined ? m.homeScore : '-'}</span>
       </div>
 
       <div class="bracket-team ${m.winner === m.away && m.away ? 'winner' : ''}">
@@ -974,7 +1093,7 @@ function renderBracketMatchCard(m, matchTypeKey, titleLabel) {
           <img src="${away.crest}" style="width: 24px; height: 24px; object-fit: contain;">
           <span style="font-weight: 700;">${away.name}</span>
         </div>
-        <span class="bracket-score">${m.awayScore !== null ? m.awayScore : '-'}</span>
+        <span class="bracket-score">${m.awayScore !== null && m.awayScore !== undefined ? m.awayScore : '-'}</span>
       </div>
 
       <div style="padding: 0.4rem; background: rgba(0,0,0,0.4); text-align: center;">
@@ -991,13 +1110,15 @@ function renderBracketMatchCard(m, matchTypeKey, titleLabel) {
 // --------------------------------------------------------------------------
 
 function renderTeamsManagementView() {
-  const catData = appState.categoriesData[appState.currentCategory];
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
   if (!catData) return '';
+
+  const teamList = catData.teams || [];
 
   return `
     <div class="section-title">
       <div>
-        <span>Equipos Registrados (${catData.teams.length} Equipos)</span>
+        <span>Equipos Registrados (${teamList.length} Equipos)</span>
         <span class="badge">Categoría ${appState.currentCategory}</span>
       </div>
       ${appState.isAdmin ? `
@@ -1012,9 +1133,9 @@ function renderTeamsManagementView() {
     </p>
 
     <div class="teams-manage-grid">
-      ${catData.teams.map(t => `
+      ${teamList.map(t => `
         <div class="team-manage-card">
-          <img src="${t.crest}" style="width: 56px; height: 56px; object-fit: contain;">
+          <img src="${t.crest || OFFICIAL_COMU_CREST}" style="width: 56px; height: 56px; object-fit: contain;">
           <h4 style="font-weight: 800; font-size: 0.95rem; color: #fff;">${t.name}</h4>
           <span style="font-size: 0.75rem; color: var(--primary-gold); font-weight: 900;">Sigla: ${t.short || '-'}</span>
 
@@ -1041,6 +1162,8 @@ function startInteractiveGroupDraw() {
 
   const modal = document.getElementById('drawModal');
   const stage = document.getElementById('drawStageContent');
+  if (!modal || !stage) return;
+
   modal.classList.add('open');
 
   stage.innerHTML = `
@@ -1059,8 +1182,13 @@ function revealGroupDrawLive() {
   const catYear = appState.currentCategory;
   executeGroupDrawBackend(catYear, true);
 
-  const catData = appState.categoriesData[catYear];
+  const catData = appState.categoriesData ? appState.categoriesData[catYear] : null;
   const stage = document.getElementById('drawStageContent');
+  if (!catData || !stage) return;
+
+  const grpA = (catData.groups && catData.groups.A) ? catData.groups.A : [];
+  const grpB = (catData.groups && catData.groups.B) ? catData.groups.B : [];
+  const grpC = (catData.groups && catData.groups.C) ? catData.groups.C : [];
 
   stage.innerHTML = `
     <div style="text-align: center;">
@@ -1071,21 +1199,21 @@ function revealGroupDrawLive() {
         <div style="background: rgba(255,215,0,0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--primary-gold);">
           <h4 style="color: var(--primary-gold); font-weight: 900;">GRUPO A</h4>
           <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
-            ${catData.groups.A.map(id => `<li>${getTeamName(id)}</li>`).join('')}
+            ${grpA.map(id => `<li>${getTeamName(id)}</li>`).join('')}
           </ul>
         </div>
 
         <div style="background: rgba(56,189,248,0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid #38bdf8;">
           <h4 style="color: #38bdf8; font-weight: 900;">GRUPO B</h4>
           <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
-            ${catData.groups.B.map(id => `<li>${getTeamName(id)}</li>`).join('')}
+            ${grpB.map(id => `<li>${getTeamName(id)}</li>`).join('')}
           </ul>
         </div>
 
         <div style="background: rgba(168,85,247,0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid #a855f7;">
           <h4 style="color: #a855f7; font-weight: 900;">GRUPO C</h4>
           <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
-            ${catData.groups.C.map(id => `<li>${getTeamName(id)}</li>`).join('')}
+            ${grpC.map(id => `<li>${getTeamName(id)}</li>`).join('')}
           </ul>
         </div>
       </div>
@@ -1095,11 +1223,12 @@ function revealGroupDrawLive() {
       </button>
     </div>
   `;
-  renderApp();
+  safeRenderApp();
 }
 
 function closeDrawModal() {
-  document.getElementById('drawModal').classList.remove('open');
+  const modal = document.getElementById('drawModal');
+  if (modal) modal.classList.remove('open');
 }
 
 // --------------------------------------------------------------------------
@@ -1109,11 +1238,14 @@ function closeDrawModal() {
 function drawCopaSemis(category, cupType) {
   if (!appState.isAdmin) return openAdminPinModal();
 
-  const catData = appState.categoriesData[category];
-  const playoffs = catData.playoffs;
+  const catData = appState.categoriesData ? appState.categoriesData[category] : null;
+  if (!catData) return;
+
+  const playoffs = catData.playoffs || createEmptyPlayoffsObj();
+  catData.playoffs = playoffs;
 
   const candidates = [];
-  playoffs.initialCruces.forEach(m => {
+  (playoffs.initialCruces || []).forEach(m => {
     if (m.winner && m.loser) {
       if (cupType === 'oro') candidates.push(m.winner);
       if (cupType === 'plata') candidates.push(m.loser);
@@ -1142,7 +1274,7 @@ function drawCopaSemis(category, cupType) {
   }
 
   saveState();
-  renderApp();
+  safeRenderApp();
   alert(`¡Sorteo de Semifinales de la Copa de ${cupType === 'oro' ? 'Oro' : 'Plata'} realizado exitosamente!`);
 }
 
@@ -1178,7 +1310,7 @@ function openEditTeamModal(teamId) {
   document.getElementById('teamPresetCrestSelect').value = '';
 
   const previewImg = document.getElementById('crestPreviewImg');
-  previewImg.src = team.crest;
+  previewImg.src = team.crest || OFFICIAL_COMU_CREST;
   document.getElementById('crestPreviewBox').style.display = 'block';
 
   document.getElementById('teamModal').classList.add('open');
@@ -1200,7 +1332,9 @@ function previewPresetCrest() {
 function saveTeamForm() {
   if (!appState.isAdmin) return;
 
-  const catData = appState.categoriesData[appState.currentCategory];
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return;
+
   const editId = document.getElementById('teamEditId').value;
   const name = document.getElementById('teamNameInput').value.trim();
   const shortName = document.getElementById('teamShortInput').value.trim().toUpperCase();
@@ -1219,7 +1353,7 @@ function saveTeamForm() {
     }
 
     if (editId) {
-      const target = catData.teams.find(t => t.id === editId);
+      const target = (catData.teams || []).find(t => t.id === editId);
       if (target) {
         target.name = name;
         target.short = shortName || name.substring(0, 3).toUpperCase();
@@ -1227,6 +1361,7 @@ function saveTeamForm() {
       }
     } else {
       const newId = 't_' + Date.now();
+      catData.teams = catData.teams || [];
       catData.teams.push({
         id: newId,
         name: name,
@@ -1238,15 +1373,16 @@ function saveTeamForm() {
 
     saveState();
     closeTeamModal();
-    renderApp();
+    safeRenderApp();
   };
 
   if (fileInput.files && fileInput.files[0]) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      processSave(e.target.result);
-    };
-    reader.readAsDataURL(fileInput.files[0]);
+    resizeImageToDataURL(fileInput.files[0], 220, 0.72)
+      .then(processSave)
+      .catch((err) => {
+        console.error(err);
+        alert('No se pudo procesar la imagen del escudo. Probá con otra imagen.');
+      });
   } else {
     processSave(null);
   }
@@ -1256,15 +1392,18 @@ function deleteTeamFromCategory(teamId) {
   if (!appState.isAdmin) return openAdminPinModal();
 
   if (confirm('¿Deseas eliminar este equipo de la categoría?')) {
-    const catData = appState.categoriesData[appState.currentCategory];
-    catData.teams = catData.teams.filter(t => t.id !== teamId);
-    saveState();
-    renderApp();
+    const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+    if (catData && catData.teams) {
+      catData.teams = catData.teams.filter(t => t.id !== teamId);
+      saveState();
+      safeRenderApp();
+    }
   }
 }
 
 function closeTeamModal() {
-  document.getElementById('teamModal').classList.remove('open');
+  const modal = document.getElementById('teamModal');
+  if (modal) modal.classList.remove('open');
 }
 
 // --------------------------------------------------------------------------
@@ -1277,22 +1416,25 @@ function openPlayoffScoreModal(matchKey) {
   if (!appState.isAdmin) return openAdminPinModal();
 
   currentPlayoffMatchKey = matchKey;
-  const playoffs = appState.categoriesData[appState.currentCategory].playoffs;
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return;
+
+  const playoffs = catData.playoffs || createEmptyPlayoffsObj();
   let matchObj = null;
 
   if (matchKey.startsWith('cruce_')) {
     const idx = parseInt(matchKey.split('_')[1], 10);
-    matchObj = playoffs.initialCruces[idx];
+    matchObj = (playoffs.initialCruces || [])[idx];
   } else if (matchKey.startsWith('oro_semi_')) {
     const idx = parseInt(matchKey.split('_')[2], 10);
-    matchObj = playoffs.oroSemis[idx];
+    matchObj = (playoffs.oroSemis || [])[idx];
   } else if (matchKey === 'oro_final') {
     matchObj = playoffs.oroFinal;
   } else if (matchKey === 'oro_third') {
     matchObj = playoffs.oroThird;
   } else if (matchKey.startsWith('plata_semi_')) {
     const idx = parseInt(matchKey.split('_')[2], 10);
-    matchObj = playoffs.plataSemis[idx];
+    matchObj = (playoffs.plataSemis || [])[idx];
   } else if (matchKey === 'plata_final') {
     matchObj = playoffs.plataFinal;
   } else if (matchKey === 'plata_third') {
@@ -1309,8 +1451,8 @@ function openPlayoffScoreModal(matchKey) {
 
   document.getElementById('modalPlayoffHomeName').innerText = home.name;
   document.getElementById('modalPlayoffAwayName').innerText = away.name;
-  document.getElementById('modalPlayoffHomeInput').value = matchObj.homeScore !== null ? matchObj.homeScore : 0;
-  document.getElementById('modalPlayoffAwayInput').value = matchObj.awayScore !== null ? matchObj.awayScore : 0;
+  document.getElementById('modalPlayoffHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
+  document.getElementById('modalPlayoffAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
 
   document.getElementById('playoffScoreModal').classList.add('open');
 }
@@ -1318,24 +1460,27 @@ function openPlayoffScoreModal(matchKey) {
 function savePlayoffScore() {
   if (!appState.isAdmin || !currentPlayoffMatchKey) return;
 
-  const playoffs = appState.categoriesData[appState.currentCategory].playoffs;
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return;
+
+  const playoffs = catData.playoffs || createEmptyPlayoffsObj();
   const homeScore = parseInt(document.getElementById('modalPlayoffHomeInput').value, 10);
   const awayScore = parseInt(document.getElementById('modalPlayoffAwayInput').value, 10);
 
   let matchObj = null;
   if (currentPlayoffMatchKey.startsWith('cruce_')) {
     const idx = parseInt(currentPlayoffMatchKey.split('_')[1], 10);
-    matchObj = playoffs.initialCruces[idx];
+    matchObj = (playoffs.initialCruces || [])[idx];
   } else if (currentPlayoffMatchKey.startsWith('oro_semi_')) {
     const idx = parseInt(currentPlayoffMatchKey.split('_')[2], 10);
-    matchObj = playoffs.oroSemis[idx];
+    matchObj = (playoffs.oroSemis || [])[idx];
   } else if (currentPlayoffMatchKey === 'oro_final') {
     matchObj = playoffs.oroFinal;
   } else if (currentPlayoffMatchKey === 'oro_third') {
     matchObj = playoffs.oroThird;
   } else if (currentPlayoffMatchKey.startsWith('plata_semi_')) {
     const idx = parseInt(currentPlayoffMatchKey.split('_')[2], 10);
-    matchObj = playoffs.plataSemis[idx];
+    matchObj = (playoffs.plataSemis || [])[idx];
   } else if (currentPlayoffMatchKey === 'plata_final') {
     matchObj = playoffs.plataFinal;
   } else if (currentPlayoffMatchKey === 'plata_third') {
@@ -1352,7 +1497,7 @@ function savePlayoffScore() {
       matchObj.loser = choice === '2' ? matchObj.home : matchObj.away;
     } else {
       matchObj.winner = homeScore > awayScore ? matchObj.home : matchObj.away;
-      matchObj.loser = homeScore > awayScore ? matchObj.away : matchObj.home;
+      matchObj.loser = homeScore > awayScore ? matchObj.away : matchObj.away;
     }
 
     syncSemisToFinals('oro');
@@ -1361,16 +1506,19 @@ function savePlayoffScore() {
 
   saveState();
   closePlayoffScoreModal();
-  renderApp();
+  safeRenderApp();
 }
 
 function syncSemisToFinals(cupType) {
-  const playoffs = appState.categoriesData[appState.currentCategory].playoffs;
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData || !catData.playoffs) return;
+
+  const playoffs = catData.playoffs;
   const semis = cupType === 'oro' ? playoffs.oroSemis : playoffs.plataSemis;
   const final = cupType === 'oro' ? playoffs.oroFinal : playoffs.plataFinal;
   const third = cupType === 'oro' ? playoffs.oroThird : playoffs.plataThird;
 
-  if (semis[0].winner && semis[1].winner) {
+  if (semis && semis[0] && semis[1] && semis[0].winner && semis[1].winner && final && third) {
     final.home = semis[0].winner;
     final.away = semis[1].winner;
 
@@ -1380,7 +1528,8 @@ function syncSemisToFinals(cupType) {
 }
 
 function closePlayoffScoreModal() {
-  document.getElementById('playoffScoreModal').classList.remove('open');
+  const modal = document.getElementById('playoffScoreModal');
+  if (modal) modal.classList.remove('open');
 }
 
 // --------------------------------------------------------------------------
@@ -1388,10 +1537,11 @@ function closePlayoffScoreModal() {
 // --------------------------------------------------------------------------
 
 function getTeamObj(teamId) {
-  if (!teamId) return { name: 'Por Definir', crest: '' };
-  const catData = appState.categoriesData[appState.currentCategory];
-  if (!catData || !catData.teams) return { name: teamId, crest: '' };
-  return catData.teams.find(t => t.id === teamId) || { name: teamId, crest: '' };
+  if (!teamId) return { name: 'Por Definir', crest: OFFICIAL_COMU_CREST };
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData || !catData.teams) return { name: teamId, crest: OFFICIAL_COMU_CREST };
+  const found = catData.teams.find(t => t.id === teamId);
+  return found || { name: teamId, crest: OFFICIAL_COMU_CREST };
 }
 
 function getTeamName(teamId) {
@@ -1401,30 +1551,33 @@ function getTeamName(teamId) {
 function selectCategory(cat) {
   appState.currentCategory = cat;
   saveState();
-  renderApp();
+  safeRenderApp();
 }
 
 function selectTab(tab) {
   appState.currentTab = tab;
   saveState();
-  renderApp();
+  safeRenderApp();
 }
 
 function openAdminPinModal() {
-  document.getElementById('adminPinInput').value = '';
-  document.getElementById('adminPinModal').classList.add('open');
+  const input = document.getElementById('adminPinInput');
+  if (input) input.value = '';
+  const modal = document.getElementById('adminPinModal');
+  if (modal) modal.classList.add('open');
 }
 
 function closeAdminPinModal() {
-  document.getElementById('adminPinModal').classList.remove('open');
+  const modal = document.getElementById('adminPinModal');
+  if (modal) modal.classList.remove('open');
 }
 
 function submitAdminPin() {
-  const enteredPin = document.getElementById('adminPinInput').value.trim();
+  const enteredPin = (document.getElementById('adminPinInput').value || '').trim();
   if (enteredPin === appState.adminPin) {
     appState.isAdmin = true;
     closeAdminPinModal();
-    renderApp();
+    safeRenderApp();
     alert('¡Sesión de Administrador iniciada correctamente!');
   } else {
     alert('Clave PIN incorrecta. Por favor vuelve a intentarlo.');
@@ -1433,7 +1586,7 @@ function submitAdminPin() {
 
 function logoutAdmin() {
   appState.isAdmin = false;
-  renderApp();
+  safeRenderApp();
   alert('Has cerrado la sesión de Administrador.');
 }
 
@@ -1442,11 +1595,12 @@ let currentEditingMatchId = null;
 function openScoreModal(matchId) {
   if (!appState.isAdmin) return openAdminPinModal();
   currentEditingMatchId = matchId;
-  const catData = appState.categoriesData[appState.currentCategory];
-  let matchObj = null;
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return;
 
-  catData.fixtures.forEach(j => {
-    const found = j.matches.find(m => m.id === matchId);
+  let matchObj = null;
+  (catData.fixtures || []).forEach(j => {
+    const found = (j.matches || []).find(m => m.id === matchId);
     if (found) matchObj = found;
   });
 
@@ -1457,8 +1611,8 @@ function openScoreModal(matchId) {
 
   document.getElementById('modalHomeName').innerText = home.name;
   document.getElementById('modalAwayName').innerText = away.name;
-  document.getElementById('modalHomeInput').value = matchObj.homeScore !== null ? matchObj.homeScore : 0;
-  document.getElementById('modalAwayInput').value = matchObj.awayScore !== null ? matchObj.awayScore : 0;
+  document.getElementById('modalHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
+  document.getElementById('modalAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
   document.getElementById('modalStatusSelect').value = matchObj.status;
   
   document.getElementById('modalDayDateInput').value = matchObj.dayDate || '';
@@ -1471,7 +1625,9 @@ function openScoreModal(matchId) {
 function saveMatchScore() {
   if (!currentEditingMatchId || !appState.isAdmin) return;
 
-  const catData = appState.categoriesData[appState.currentCategory];
+  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
+  if (!catData) return;
+
   const homeScore = parseInt(document.getElementById('modalHomeInput').value, 10);
   const awayScore = parseInt(document.getElementById('modalAwayInput').value, 10);
   const status = document.getElementById('modalStatusSelect').value;
@@ -1480,8 +1636,8 @@ function saveMatchScore() {
   const time = document.getElementById('modalTimeInput').value.trim();
   const pitch = document.getElementById('modalPitchInput').value.trim();
 
-  catData.fixtures.forEach(j => {
-    const matchObj = j.matches.find(m => m.id === currentEditingMatchId);
+  (catData.fixtures || []).forEach(j => {
+    const matchObj = (j.matches || []).find(m => m.id === currentEditingMatchId);
     if (matchObj) {
       matchObj.homeScore = isNaN(homeScore) ? 0 : homeScore;
       matchObj.awayScore = isNaN(awayScore) ? 0 : awayScore;
@@ -1494,21 +1650,24 @@ function saveMatchScore() {
 
   saveState();
   closeScoreModal();
-  renderApp();
+  safeRenderApp();
 }
 
 function closeScoreModal() {
-  document.getElementById('scoreModal').classList.remove('open');
+  const modal = document.getElementById('scoreModal');
+  if (modal) modal.classList.remove('open');
 }
 
 // Sponsor Actions
 function openAddSponsorModal() {
   if (!appState.isAdmin) return openAdminPinModal();
-  document.getElementById('sponsorModal').classList.add('open');
+  const modal = document.getElementById('sponsorModal');
+  if (modal) modal.classList.add('open');
 }
 
 function closeSponsorModal() {
-  document.getElementById('sponsorModal').classList.remove('open');
+  const modal = document.getElementById('sponsorModal');
+  if (modal) modal.classList.remove('open');
 }
 
 function saveSponsor() {
@@ -1532,18 +1691,20 @@ function saveSponsor() {
       logo: logoUrl || DEFAULT_SPONSORS[0].logo,
       url: url
     };
+    appState.sponsors = appState.sponsors || [];
     appState.sponsors.push(newSp);
     saveState();
     closeSponsorModal();
-    renderApp();
+    safeRenderApp();
   };
 
   if (fileInput.files && fileInput.files[0]) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      createSponsorObj(e.target.result);
-    };
-    reader.readAsDataURL(fileInput.files[0]);
+    resizeImageToDataURL(fileInput.files[0], 260, 0.72)
+      .then(createSponsorObj)
+      .catch((err) => {
+        console.error(err);
+        alert('No se pudo procesar el logo del sponsor. Probá con otra imagen.');
+      });
   } else {
     createSponsorObj(null);
   }
@@ -1553,24 +1714,25 @@ function deleteSponsor(spId) {
   if (!appState.isAdmin) return openAdminPinModal();
 
   if (confirm('¿Deseas eliminar este sponsor?')) {
-    appState.sponsors = appState.sponsors.filter(s => s.id !== spId);
+    appState.sponsors = (appState.sponsors || []).filter(s => s.id !== spId);
     saveState();
-    renderApp();
+    safeRenderApp();
   }
 }
 
 function renderSponsorsView() {
+  const list = appState.sponsors || DEFAULT_SPONSORS;
   return `
     <div class="section-title">
       <div>
         <span>Auspiciantes y Sponsors Oficiales</span>
-        <span class="badge">${appState.sponsors.length} Sponsors Activos</span>
+        <span class="badge">${list.length} Sponsors Activos</span>
       </div>
       <button class="btn-primary" onclick="openAddSponsorModal()">+ Agregar Auspiciante</button>
     </div>
 
     <div class="sponsor-admin-grid">
-      ${appState.sponsors.map(sp => `
+      ${list.map(sp => `
         <div class="sponsor-card-admin">
           <span class="sponsor-tier-badge tier-${sp.tier}">Sponsor ${sp.tier.toUpperCase()}</span>
           <img src="${sp.logo}" alt="${sp.name}" style="max-height: 80px; width: 100%; object-fit: contain;">
@@ -1636,7 +1798,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 function triggerPwaInstall() {
   if (deferredPrompt) {
     deferredPrompt.prompt();
-    deferredPrompt.userChoice.then((choiceResult) => {
+    deferredPrompt.userChoice.then(() => {
       deferredPrompt = null;
     });
   } else {
@@ -1644,7 +1806,14 @@ function triggerPwaInstall() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+// Robust Immediate + Event Initialization
+function bootApp() {
   initData();
-  renderApp();
-});
+  safeRenderApp();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}
