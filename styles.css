@@ -112,6 +112,8 @@ body {
 .club-badge {
   width: 64px;
   height: 64px;
+  object-fit: contain;
+  border-radius: 50%;
   filter: drop-shadow(0 0 10px var(--gold-glow));
   transition: var(--transition);
 }
@@ -147,6 +149,52 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+/* Sync Status Badge (Firebase real-time) */
+.sync-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+}
+
+.sync-status-badge .sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sync-status-badge.is-live .sync-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  animation: sync-pulse 1.8s infinite;
+}
+
+.sync-status-badge.is-connecting .sync-dot {
+  background: #eab308;
+}
+
+.sync-status-badge.is-offline .sync-dot {
+  background: #6b7280;
+}
+
+@keyframes sync-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+@media (max-width: 640px) {
+  .sync-status-badge span.sync-label { display: none; }
 }
 
 /* Sponsor Marquee Bar */

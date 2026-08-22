@@ -1,6 +1,6 @@
 /* ==========================================================================
    CAMPEONATO DE FÚTBOL INFANTIL - APP CORE LOGIC (v5.2 Definitiva)
-   Club Atlético Comunicaciones de Mercedes (Corrientes)
+   Club Social y Deportivo Comunicaciones de Mercedes (Corrientes)
    Categorías: 2015, 2016, 2017, 2018, 2019
    ========================================================================== */
 
@@ -13,8 +13,8 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 
-// Escudo Oficial Aurinegro de Club Atlético Comunicaciones de Mercedes (Corrientes)
-const OFFICIAL_COMU_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 140'><g><path d='M60 5 L112 25 L112 75 C112 105 60 135 60 135 C60 135 8 105 8 75 L8 25 Z' fill='%23ffd700' stroke='%23000000' stroke-width='6'/><path d='M8 25 L112 25 L112 48 L8 48 Z' fill='%23000000'/><text x='60' y='41' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='13' fill='%23ffd700' letter-spacing='1'>COMUNICACIONES</text><rect x='22' y='48' width='15' height='68' fill='%23000000'/><rect x='52.5' y='48' width='15' height='75' fill='%23000000'/><rect x='83' y='48' width='15' height='68' fill='%23000000'/><path d='M20 70 L100 70 L100 95 L20 95 Z' fill='%23ffd700' stroke='%23000000' stroke-width='3'/><text x='60' y='88' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='14' fill='%23000000'>MERCEDES</text></g></svg>`;
+// Escudo Oficial de Club Social y Deportivo Comunicaciones (Mercedes, Corrientes)
+const OFFICIAL_COMU_CREST = 'escudo-comunicaciones.webp';
 
 const TEAM_CRESTS = {
   comu: OFFICIAL_COMU_CREST,
@@ -96,6 +96,130 @@ let appState = {
   adminPin: 'comu2026'
 };
 
+// --------------------------------------------------------------------------
+// SINCRONIZACIÓN EN TIEMPO REAL (Firebase Realtime Database)
+// --------------------------------------------------------------------------
+// Todo lo que es "dato compartido del torneo" (equipos, fixtures, resultados,
+// cruces, sponsors, PIN de admin) vive en un único nodo de Firebase:
+// "comu_torneo_state". Cada dispositivo escucha ese nodo en vivo: en cuanto
+// alguien (el admin) hace un cambio, se escribe en Firebase y todos los
+// demás dispositivos que tengan la app abierta lo reciben y re-renderizan
+// al instante, sin recargar la página.
+//
+// "currentCategory", "currentTab" e "isAdmin" quedan fuera de la sync:
+// son preferencias de navegación propias de cada dispositivo, no datos
+// del torneo, así que cada uno mantiene las suyas en su localStorage.
+
+let fbSyncRef = null;
+let fbSyncReady = false;
+let fbHasReceivedFirstSnapshot = false;
+let fbApplyingRemoteUpdate = false;
+let fbSyncTimeout = null;
+
+const SYNC_FIELDS = ['categoriesData', 'sponsors', 'adminPin'];
+
+function initFirebaseSync() {
+  try {
+    if (typeof firebase === 'undefined' || !window.COMU_FIREBASE_CONFIG) {
+      console.warn('Firebase no está disponible: la app funcionará solo en modo local (sin sincronización entre dispositivos).');
+      setSyncStatus('offline');
+      return;
+    }
+
+    setSyncStatus('connecting');
+
+    if (!firebase.apps || !firebase.apps.length) {
+      firebase.initializeApp(window.COMU_FIREBASE_CONFIG);
+    }
+
+    const db = firebase.database();
+    fbSyncRef = db.ref('comu_torneo_state');
+
+    // Marca visualmente si se corta la conexión a internet / a Firebase.
+    db.ref('.info/connected').on('value', (snap) => {
+      if (snap.val() === true) {
+        if (fbHasReceivedFirstSnapshot) setSyncStatus('live');
+      } else {
+        setSyncStatus('connecting');
+      }
+    });
+
+    fbSyncRef.on('value', (snapshot) => {
+      const remote = snapshot.val();
+
+      if (remote && remote.categoriesData) {
+        fbApplyingRemoteUpdate = true;
+        try {
+          SYNC_FIELDS.forEach(field => {
+            if (remote[field] !== undefined) appState[field] = remote[field];
+          });
+          saveLocalStateOnly();
+          safeRenderApp();
+        } finally {
+          fbApplyingRemoteUpdate = false;
+        }
+      }
+
+      if (!fbHasReceivedFirstSnapshot) {
+        fbHasReceivedFirstSnapshot = true;
+        fbSyncReady = true;
+        setSyncStatus('live');
+        if (!remote || !remote.categoriesData) {
+          // Todavía no hay nada en Firebase: este dispositivo "siembra"
+          // el estado inicial para que el resto se sincronice a partir de acá.
+          pushStateToFirebase();
+        }
+      }
+    }, (err) => {
+      console.error('Error de sincronización con Firebase:', err);
+      setSyncStatus('offline');
+    });
+  } catch (e) {
+    console.error('No se pudo inicializar Firebase:', e);
+    setSyncStatus('offline');
+  }
+}
+
+function pushStateToFirebase() {
+  if (!fbSyncRef) return;
+  try {
+    fbSyncRef.set({
+      categoriesData: appState.categoriesData,
+      sponsors: appState.sponsors,
+      adminPin: appState.adminPin,
+      updatedAt: (typeof firebase !== 'undefined' && firebase.database && firebase.database.ServerValue)
+        ? firebase.database.ServerValue.TIMESTAMP
+        : Date.now()
+    });
+  } catch (e) {
+    console.error('Error enviando datos a Firebase:', e);
+  }
+}
+
+// Debounce chico para no mandar decenas de escrituras seguidas cuando el
+// admin hace varios cambios rápidos (por ejemplo, cargar varios resultados).
+function scheduleFirebasePush() {
+  if (!fbSyncReady || fbApplyingRemoteUpdate) return;
+  if (fbSyncTimeout) clearTimeout(fbSyncTimeout);
+  fbSyncTimeout = setTimeout(() => {
+    fbSyncTimeout = null;
+    pushStateToFirebase();
+  }, 150);
+}
+
+function setSyncStatus(status) {
+  const badge = document.getElementById('syncStatusBadge');
+  if (!badge) return;
+  const modes = {
+    live: { cls: 'is-live', dot: '', text: '🟢 En vivo' },
+    connecting: { cls: 'is-connecting', dot: '', text: '🟡 Conectando…' },
+    offline: { cls: 'is-offline', dot: '', text: '⚪ Sin conexión' }
+  };
+  const m = modes[status] || modes.offline;
+  badge.className = 'sync-status-badge ' + m.cls;
+  badge.innerHTML = `<span class="sync-dot"></span><span class="sync-label">${m.text}</span>`;
+}
+
 // Initialize App Data & Migration Safety
 function initData() {
   try {
@@ -159,6 +283,21 @@ function initData() {
 }
 
 function saveState() {
+  saveLocalStateOnly();
+  // Si el cambio vino de un dato que acabamos de recibir de Firebase, no lo
+  // reenviamos (evita un eco infinito). Si es un cambio genuino del usuario
+  // (admin cargando un resultado, etc.), lo propagamos a todos los demás
+  // dispositivos conectados.
+  if (!fbApplyingRemoteUpdate) {
+    scheduleFirebasePush();
+  }
+}
+
+// Guarda el estado únicamente en el localStorage de este dispositivo,
+// sin tocar Firebase. Se usa tanto desde saveState() como al recibir
+// actualizaciones remotas (para no perder los datos si el usuario cierra
+// la app sin haber tocado nada).
+function saveLocalStateOnly() {
   try {
     const dataToSave = {
       currentCategory: appState.currentCategory,
@@ -1810,6 +1949,7 @@ function triggerPwaInstall() {
 function bootApp() {
   initData();
   safeRenderApp();
+  initFirebaseSync();
 }
 
 if (document.readyState === 'loading') {
