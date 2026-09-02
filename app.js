@@ -86,6 +86,11 @@ const DEFAULT_SPONSORS = [
 
 const CATEGORIES = ['2015', '2016', '2017', '2018', '2019'];
 
+// Email fijo usado internamente para autenticar al administrador contra
+// Firebase Authentication. El admin nunca ve ni escribe este email: sigue
+// ingresando solo su PIN de siempre, y este email se usa por detrás.
+const ADMIN_EMAIL = 'admin@torneo-comunicaciones.local';
+
 // Global App State
 let appState = {
   currentCategory: '2015',
@@ -1711,19 +1716,36 @@ function closeAdminPinModal() {
   if (modal) modal.classList.remove('open');
 }
 
+// Autenticación real de administrador contra Firebase Authentication.
+// El admin sigue escribiendo solo su PIN de siempre; ese PIN se usa como
+// contraseña de una cuenta fija de Firebase (ADMIN_EMAIL) creada de antemano
+// en la consola. Así, la regla de seguridad "auth != null && auth.uid === '...'"
+// puede validar de verdad quién puede escribir en la base.
 function submitAdminPin() {
   const enteredPin = (document.getElementById('adminPinInput').value || '').trim();
-  if (enteredPin === appState.adminPin) {
-    appState.isAdmin = true;
-    closeAdminPinModal();
-    safeRenderApp();
-    alert('¡Sesión de Administrador iniciada correctamente!');
-  } else {
-    alert('Clave PIN incorrecta. Por favor vuelve a intentarlo.');
+
+  if (typeof firebase === 'undefined' || !firebase.auth) {
+    alert('No se pudo conectar con el sistema de autenticación. Verificá tu conexión a internet e intentá de nuevo.');
+    return;
   }
+
+  firebase.auth().signInWithEmailAndPassword(ADMIN_EMAIL, enteredPin)
+    .then(() => {
+      appState.isAdmin = true;
+      closeAdminPinModal();
+      safeRenderApp();
+      alert('¡Sesión de Administrador iniciada correctamente!');
+    })
+    .catch((error) => {
+      console.error('Error de login admin:', error);
+      alert('Clave PIN incorrecta. Por favor vuelve a intentarlo.');
+    });
 }
 
 function logoutAdmin() {
+  if (typeof firebase !== 'undefined' && firebase.auth) {
+    firebase.auth().signOut();
+  }
   appState.isAdmin = false;
   safeRenderApp();
   alert('Has cerrado la sesión de Administrador.');
@@ -1950,6 +1972,15 @@ function bootApp() {
   initData();
   safeRenderApp();
   initFirebaseSync();
+
+  // Restaura la sesión de admin si Firebase ya recuerda un login activo
+  // (por ejemplo, si recargás la página sin haber cerrado sesión antes).
+  if (typeof firebase !== 'undefined' && firebase.auth) {
+    firebase.auth().onAuthStateChanged((user) => {
+      appState.isAdmin = !!user;
+      safeRenderApp();
+    });
+  }
 }
 
 if (document.readyState === 'loading') {
