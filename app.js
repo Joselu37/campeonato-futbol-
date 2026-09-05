@@ -1,6 +1,6 @@
 /* ==========================================================================
    CAMPEONATO DE FÚTBOL INFANTIL - APP CORE LOGIC (v5.2 Definitiva)
-   Club Social y Deportivo Comunicaciones de Mercedes (Corrientes)
+   Club Atlético Comunicaciones de Mercedes (Corrientes)
    Categorías: 2015, 2016, 2017, 2018, 2019
    ========================================================================== */
 
@@ -13,8 +13,8 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 
-// Escudo Oficial de Club Social y Deportivo Comunicaciones (Mercedes, Corrientes)
-const OFFICIAL_COMU_CREST = 'escudo-comunicaciones.webp';
+// Escudo Oficial Aurinegro de Club Atlético Comunicaciones de Mercedes (Corrientes)
+const OFFICIAL_COMU_CREST = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 140'><g><path d='M60 5 L112 25 L112 75 C112 105 60 135 60 135 C60 135 8 105 8 75 L8 25 Z' fill='%23ffd700' stroke='%23000000' stroke-width='6'/><path d='M8 25 L112 25 L112 48 L8 48 Z' fill='%23000000'/><text x='60' y='41' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='13' fill='%23ffd700' letter-spacing='1'>COMUNICACIONES</text><rect x='22' y='48' width='15' height='68' fill='%23000000'/><rect x='52.5' y='48' width='15' height='75' fill='%23000000'/><rect x='83' y='48' width='15' height='68' fill='%23000000'/><path d='M20 70 L100 70 L100 95 L20 95 Z' fill='%23ffd700' stroke='%23000000' stroke-width='3'/><text x='60' y='88' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='14' fill='%23000000'>MERCEDES</text></g></svg>`;
 
 const TEAM_CRESTS = {
   comu: OFFICIAL_COMU_CREST,
@@ -86,238 +86,106 @@ const DEFAULT_SPONSORS = [
 
 const CATEGORIES = ['2015', '2016', '2017', '2018', '2019'];
 
-// Email fijo usado internamente para autenticar al administrador contra
-// Firebase Authentication. El admin nunca ve ni escribe este email: sigue
-// ingresando solo su PIN de siempre, y este email se usa por detrás.
-const ADMIN_EMAIL = 'admin@torneo-comunicaciones.local';
-
 // Global App State
 let appState = {
   currentCategory: '2015',
   currentTab: 'fixture',
   categoriesData: {},
   sponsors: DEFAULT_SPONSORS,
-  isAdmin: false,
-  adminPin: 'comu2026'
+  isAdmin: false
 };
 
-// --------------------------------------------------------------------------
-// SINCRONIZACIÓN EN TIEMPO REAL (Firebase Realtime Database)
-// --------------------------------------------------------------------------
-// Todo lo que es "dato compartido del torneo" (equipos, fixtures, resultados,
-// cruces, sponsors, PIN de admin) vive en un único nodo de Firebase:
-// "comu_torneo_state". Cada dispositivo escucha ese nodo en vivo: en cuanto
-// alguien (el admin) hace un cambio, se escribe en Firebase y todos los
-// demás dispositivos que tengan la app abierta lo reciben y re-renderizan
-// al instante, sin recargar la página.
-//
-// "currentCategory", "currentTab" e "isAdmin" quedan fuera de la sync:
-// son preferencias de navegación propias de cada dispositivo, no datos
-// del torneo, así que cada uno mantiene las suyas en su localStorage.
+// --- Conexión a Firebase (datos en vivo, compartidos por todos los dispositivos) ---
+const fbDB = firebase.database();
+const fbAuth = firebase.auth();
+const stateRef = fbDB.ref('tournamentState');
+let firebaseReady = false; // evita pisar datos remotos antes de recibir el primer snapshot
 
-let fbSyncRef = null;
-let fbSyncReady = false;
-let fbHasReceivedFirstSnapshot = false;
-let fbApplyingRemoteUpdate = false;
-let fbSyncTimeout = null;
-
-const SYNC_FIELDS = ['categoriesData', 'sponsors', 'adminPin'];
-
-function initFirebaseSync() {
-  try {
-    if (typeof firebase === 'undefined' || !window.COMU_FIREBASE_CONFIG) {
-      console.warn('Firebase no está disponible: la app funcionará solo en modo local (sin sincronización entre dispositivos).');
-      setSyncStatus('offline');
-      return;
+// Repara/completa la estructura de categorías (equipos, grupos, fixtures, playoffs)
+function repairCategoriesData(categoriesData) {
+  categoriesData = categoriesData || {};
+  CATEGORIES.forEach(cat => {
+    let catData = categoriesData[cat];
+    if (!catData) {
+      catData = {
+        format: 'groups_cup',
+        teams: JSON.parse(JSON.stringify(DEFAULT_12_TEAMS)),
+        groups: { A: [], B: [], C: [] },
+        fixtures: [],
+        playoffs: createEmptyPlayoffsObj()
+      };
+      categoriesData[cat] = catData;
+      appState.categoriesData = categoriesData;
+      executeGroupDrawBackend(cat, false);
+    } else {
+      if (!catData.format) catData.format = 'groups_cup';
+      if (!catData.teams || !Array.isArray(catData.teams) || catData.teams.length === 0) {
+        catData.teams = JSON.parse(JSON.stringify(DEFAULT_12_TEAMS));
+      }
+      if (!catData.groups || !catData.groups.A || catData.groups.A.length === 0) {
+        catData.groups = { A: [], B: [], C: [] };
+        appState.categoriesData = categoriesData;
+        executeGroupDrawBackend(cat, false);
+      }
+      if (!catData.fixtures || !Array.isArray(catData.fixtures) || catData.fixtures.length === 0) {
+        catData.fixtures = generateGroupsFixtures(catData.groups, cat);
+      }
+      if (!catData.playoffs || !catData.playoffs.initialCruces) {
+        catData.playoffs = createEmptyPlayoffsObj();
+      }
     }
-
-    setSyncStatus('connecting');
-
-    if (!firebase.apps || !firebase.apps.length) {
-      firebase.initializeApp(window.COMU_FIREBASE_CONFIG);
-    }
-
-    const db = firebase.database();
-    fbSyncRef = db.ref('comu_torneo_state');
-
-    // Marca visualmente si se corta la conexión a internet / a Firebase.
-    db.ref('.info/connected').on('value', (snap) => {
-      if (snap.val() === true) {
-        if (fbHasReceivedFirstSnapshot) setSyncStatus('live');
-      } else {
-        setSyncStatus('connecting');
-      }
-    });
-
-    fbSyncRef.on('value', (snapshot) => {
-      const remote = snapshot.val();
-
-      if (remote && remote.categoriesData) {
-        fbApplyingRemoteUpdate = true;
-        try {
-          SYNC_FIELDS.forEach(field => {
-            if (remote[field] !== undefined) appState[field] = remote[field];
-          });
-          saveLocalStateOnly();
-          safeRenderApp();
-        } finally {
-          fbApplyingRemoteUpdate = false;
-        }
-      }
-
-      if (!fbHasReceivedFirstSnapshot) {
-        fbHasReceivedFirstSnapshot = true;
-        fbSyncReady = true;
-        setSyncStatus('live');
-        if (!remote || !remote.categoriesData) {
-          // Todavía no hay nada en Firebase: este dispositivo "siembra"
-          // el estado inicial para que el resto se sincronice a partir de acá.
-          pushStateToFirebase();
-        }
-      }
-    }, (err) => {
-      console.error('Error de sincronización con Firebase:', err);
-      setSyncStatus('offline');
-    });
-  } catch (e) {
-    console.error('No se pudo inicializar Firebase:', e);
-    setSyncStatus('offline');
-  }
+  });
+  return categoriesData;
 }
 
-function pushStateToFirebase() {
-  if (!fbSyncRef) return;
-  try {
-    fbSyncRef.set({
-      categoriesData: appState.categoriesData,
-      sponsors: appState.sponsors,
-      adminPin: appState.adminPin,
-      updatedAt: (typeof firebase !== 'undefined' && firebase.database && firebase.database.ServerValue)
-        ? firebase.database.ServerValue.TIMESTAMP
-        : Date.now()
-    });
-  } catch (e) {
-    console.error('Error enviando datos a Firebase:', e);
-  }
-}
-
-// Debounce chico para no mandar decenas de escrituras seguidas cuando el
-// admin hace varios cambios rápidos (por ejemplo, cargar varios resultados).
-function scheduleFirebasePush() {
-  if (!fbSyncReady || fbApplyingRemoteUpdate) return;
-  if (fbSyncTimeout) clearTimeout(fbSyncTimeout);
-  fbSyncTimeout = setTimeout(() => {
-    fbSyncTimeout = null;
-    pushStateToFirebase();
-  }, 150);
-}
-
-function setSyncStatus(status) {
-  const badge = document.getElementById('syncStatusBadge');
-  if (!badge) return;
-  const modes = {
-    live: { cls: 'is-live', dot: '', text: '🟢 En vivo' },
-    connecting: { cls: 'is-connecting', dot: '', text: '🟡 Conectando…' },
-    offline: { cls: 'is-offline', dot: '', text: '⚪ Sin conexión' }
-  };
-  const m = modes[status] || modes.offline;
-  badge.className = 'sync-status-badge ' + m.cls;
-  badge.innerHTML = `<span class="sync-dot"></span><span class="sync-label">${m.text}</span>`;
-}
-
-// Initialize App Data & Migration Safety
+// Se llama una vez al arrancar: escucha la base en tiempo real y arma el estado local.
 function initData() {
-  try {
-    const savedData = localStorage.getItem('comu_torneo_app_state_v5');
-    if (savedData) {
-      const parsed = JSON.parse(savedData);
-      if (parsed && parsed.categoriesData) {
-        appState.currentCategory = parsed.currentCategory || '2015';
-        appState.currentTab = parsed.currentTab || 'fixture';
-        appState.isAdmin = !!parsed.isAdmin;
-        appState.adminPin = parsed.adminPin || 'comu2026';
-        appState.categoriesData = parsed.categoriesData;
-
-        // Repair any category data structure if needed
-        CATEGORIES.forEach(cat => {
-          let catData = appState.categoriesData[cat];
-          if (!catData) {
-            catData = {
-              format: 'groups_cup',
-              teams: JSON.parse(JSON.stringify(DEFAULT_12_TEAMS)),
-              groups: { A: [], B: [], C: [] },
-              fixtures: [],
-              playoffs: createEmptyPlayoffsObj()
-            };
-            appState.categoriesData[cat] = catData;
-            executeGroupDrawBackend(cat, false);
-          } else {
-            if (!catData.format) catData.format = 'groups_cup';
-            if (!catData.teams || !Array.isArray(catData.teams) || catData.teams.length === 0) {
-              catData.teams = JSON.parse(JSON.stringify(DEFAULT_12_TEAMS));
-            }
-            if (!catData.groups || !catData.groups.A || catData.groups.A.length === 0) {
-              catData.groups = { A: [], B: [], C: [] };
-              executeGroupDrawBackend(cat, false);
-            }
-            if (!catData.fixtures || !Array.isArray(catData.fixtures) || catData.fixtures.length === 0) {
-              catData.fixtures = generateGroupsFixtures(catData.groups, cat);
-            }
-            if (!catData.playoffs || !catData.playoffs.initialCruces) {
-              catData.playoffs = createEmptyPlayoffsObj();
-            }
-          }
-        });
-
-        appState.sponsors = DEFAULT_SPONSORS;
-        saveState();
-        return;
-      }
+  stateRef.on('value', (snapshot) => {
+    const remote = snapshot.val();
+    if (remote && remote.categoriesData) {
+      appState.currentCategory = remote.currentCategory || appState.currentCategory || '2015';
+      appState.categoriesData = repairCategoriesData(remote.categoriesData);
+      appState.sponsors = (remote.sponsors && remote.sponsors.length) ? remote.sponsors : DEFAULT_SPONSORS;
+    } else if (!firebaseReady) {
+      // Primera vez que se usa la app y todavía no hay nada guardado en Firebase.
+      generateDefaultTournamentState();
     }
-  } catch (e) {
-    console.error('Error loading stored state, performing clean reset:', e);
-  }
+    firebaseReady = true;
+    safeRenderApp();
+  }, (error) => {
+    console.error('Error de conexión con Firebase:', error);
+    if (!firebaseReady) {
+      generateDefaultTournamentState();
+      firebaseReady = true;
+      safeRenderApp();
+    }
+    alert('No se pudo conectar con la base de datos en línea (revisá tu conexión a internet). Mostrando datos locales mientras tanto.');
+  });
 
-  // Fallback: Clear corrupted state and generate clean state
-  try {
-    localStorage.removeItem('comu_torneo_app_state_v4');
-    localStorage.removeItem('comu_torneo_app_state_v5');
-  } catch (e) {}
-
-  generateDefaultTournamentState();
+  fbAuth.onAuthStateChanged((user) => {
+    appState.isAdmin = !!user;
+    renderAdminHeaderStatus();
+  });
 }
 
+// Guarda el estado en Firebase para que se vea igual en todos los dispositivos.
+// Solo funciona si hay una sesión de administrador activa (lo exige la regla de seguridad).
 function saveState() {
-  saveLocalStateOnly();
-  // Si el cambio vino de un dato que acabamos de recibir de Firebase, no lo
-  // reenviamos (evita un eco infinito). Si es un cambio genuino del usuario
-  // (admin cargando un resultado, etc.), lo propagamos a todos los demás
-  // dispositivos conectados.
-  if (!fbApplyingRemoteUpdate) {
-    scheduleFirebasePush();
-  }
-}
-
-// Guarda el estado únicamente en el localStorage de este dispositivo,
-// sin tocar Firebase. Se usa tanto desde saveState() como al recibir
-// actualizaciones remotas (para no perder los datos si el usuario cierra
-// la app sin haber tocado nada).
-function saveLocalStateOnly() {
-  try {
-    const dataToSave = {
-      currentCategory: appState.currentCategory,
-      currentTab: appState.currentTab,
-      categoriesData: appState.categoriesData,
-      sponsors: appState.sponsors,
-      adminPin: appState.adminPin
-    };
-    localStorage.setItem('comu_torneo_app_state_v5', JSON.stringify(dataToSave));
-  } catch (e) {
-    console.error('Error saving state to localStorage:', e);
-    if (e && e.name === 'QuotaExceededError') {
-      alert('No se pudo guardar: se llenó el espacio de almacenamiento (demasiadas fotos/escudos pesados). Los últimos cambios NO se guardaron. Borrá algún escudo o logo de sponsor pesado desde el panel de admin, o subí imágenes más livianas.');
+  if (!appState.isAdmin) return; // los visitantes solo leen, nunca escriben
+  const dataToSave = {
+    currentCategory: appState.currentCategory,
+    currentTab: appState.currentTab,
+    categoriesData: appState.categoriesData,
+    sponsors: appState.sponsors
+  };
+  stateRef.set(dataToSave).catch((e) => {
+    console.error('Error guardando en Firebase:', e);
+    if (e && e.code === 'PERMISSION_DENIED') {
+      alert('No se pudo guardar: tu sesión de administrador no es válida o expiró. Cerrá sesión y volvé a ingresar.');
+    } else {
+      alert('No se pudo guardar el cambio (' + (e && e.message ? e.message : 'error desconocido') + '). Probá de nuevo.');
     }
-  }
+  });
 }
 
 // Comprime y redimensiona una imagen antes de convertirla a base64,
@@ -1705,7 +1573,9 @@ function selectTab(tab) {
 }
 
 function openAdminPinModal() {
+  const emailInput = document.getElementById('adminEmailInput');
   const input = document.getElementById('adminPinInput');
+  if (emailInput) emailInput.value = '';
   if (input) input.value = '';
   const modal = document.getElementById('adminPinModal');
   if (modal) modal.classList.add('open');
@@ -1716,39 +1586,30 @@ function closeAdminPinModal() {
   if (modal) modal.classList.remove('open');
 }
 
-// Autenticación real de administrador contra Firebase Authentication.
-// El admin sigue escribiendo solo su PIN de siempre; ese PIN se usa como
-// contraseña de una cuenta fija de Firebase (ADMIN_EMAIL) creada de antemano
-// en la consola. Así, la regla de seguridad "auth != null && auth.uid === '...'"
-// puede validar de verdad quién puede escribir en la base.
 function submitAdminPin() {
-  const enteredPin = (document.getElementById('adminPinInput').value || '').trim();
-
-  if (typeof firebase === 'undefined' || !firebase.auth) {
-    alert('No se pudo conectar con el sistema de autenticación. Verificá tu conexión a internet e intentá de nuevo.');
+  const email = (document.getElementById('adminEmailInput').value || '').trim();
+  const password = (document.getElementById('adminPinInput').value || '').trim();
+  if (!email || !password) {
+    alert('Ingresá el email y la contraseña de administrador.');
     return;
   }
-
-  firebase.auth().signInWithEmailAndPassword(ADMIN_EMAIL, enteredPin)
+  fbAuth.signInWithEmailAndPassword(email, password)
     .then(() => {
-      appState.isAdmin = true;
       closeAdminPinModal();
       safeRenderApp();
       alert('¡Sesión de Administrador iniciada correctamente!');
     })
-    .catch((error) => {
-      console.error('Error de login admin:', error);
-      alert('Clave PIN incorrecta. Por favor vuelve a intentarlo.');
+    .catch((err) => {
+      console.error(err);
+      alert('No se pudo iniciar sesión: email o contraseña incorrectos.');
     });
 }
 
 function logoutAdmin() {
-  if (typeof firebase !== 'undefined' && firebase.auth) {
-    firebase.auth().signOut();
-  }
-  appState.isAdmin = false;
-  safeRenderApp();
-  alert('Has cerrado la sesión de Administrador.');
+  fbAuth.signOut().then(() => {
+    safeRenderApp();
+    alert('Has cerrado la sesión de Administrador.');
+  });
 }
 
 let currentEditingMatchId = null;
@@ -1969,18 +1830,11 @@ function triggerPwaInstall() {
 
 // Robust Immediate + Event Initialization
 function bootApp() {
-  initData();
-  safeRenderApp();
-  initFirebaseSync();
-
-  // Restaura la sesión de admin si Firebase ya recuerda un login activo
-  // (por ejemplo, si recargás la página sin haber cerrado sesión antes).
-  if (typeof firebase !== 'undefined' && firebase.auth) {
-    firebase.auth().onAuthStateChanged((user) => {
-      appState.isAdmin = !!user;
-      safeRenderApp();
-    });
+  const mainContent = document.getElementById('mainContent');
+  if (mainContent) {
+    mainContent.innerHTML = '<div style="text-align:center; padding: 3rem 1rem; color: var(--text-muted);">Conectando con el torneo en vivo…</div>';
   }
+  initData(); // el primer render ocurre cuando llega el primer snapshot de Firebase
 }
 
 if (document.readyState === 'loading') {
