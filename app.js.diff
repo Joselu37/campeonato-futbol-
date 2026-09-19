@@ -1,0 +1,777 @@
+--- app.js.bak	2026-09-17 11:22:45.885592367 +0000
++++ app.js	2026-09-19 23:37:01.859217839 +0000
+@@ -278,7 +278,8 @@
+               catData.fixtures = generateGroupsFixtures(catData.groups, cat);
+             }
+             if (!catData.playoffs || !catData.playoffs.initialCruces) {
+-              catData.playoffs = createEmptyPlayoffsObj();
++              const repairNumGroups = catData.numGroups || Object.keys(catData.groups || {}).length || 3;
++              catData.playoffs = createEmptyPlayoffsObj(repairNumGroups);
+             }
+           }
+         });
+@@ -380,14 +381,27 @@
+   saveLocalStateOnly();
+ }
+ 
+-function createEmptyPlayoffsObj() {
+-  return {
+-    initialCruces: [
++function generateGroupLetters(n) {
++  const letters = [];
++  for (let i = 0; i < n; i++) letters.push(String.fromCharCode(65 + i));
++  return letters;
++}
++
++function createEmptyPlayoffsObj(numGroups = 3) {
++  const initialCruces = numGroups === 2 ? [
++      { id: 'cruce_0', label: '1° Grupo A vs 4° Grupo B', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 15:00 hs' },
++      { id: 'cruce_1', label: '1° Grupo B vs 4° Grupo A', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 16:15 hs' },
++      { id: 'cruce_2', label: '2° Grupo A vs 3° Grupo B', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 17:30 hs' },
++      { id: 'cruce_3', label: '2° Grupo B vs 3° Grupo A', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 18:45 hs' }
++    ] : [
+       { id: 'cruce_0', label: '1er Mejor 1° vs 2do Mejor 3°', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 15:00 hs' },
+       { id: 'cruce_1', label: '2do Mejor 1° vs 1er Mejor 3°', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 16:15 hs' },
+       { id: 'cruce_2', label: '3er Mejor 1° vs Peor 2°', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 17:30 hs' },
+       { id: 'cruce_3', label: '1er Mejor 2° vs 2do Mejor 2°', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Sábado - 18:45 hs' }
+-    ],
++    ];
++
++  return {
++    initialCruces: initialCruces,
+     oroSemis: [
+       { id: 'oro_semi_0', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Domingo - 10:00 hs' },
+       { id: 'oro_semi_1', home: null, away: null, homeScore: null, awayScore: null, winner: null, loser: null, dayDate: 'Domingo - 11:15 hs' }
+@@ -402,7 +416,8 @@
+     plataThird: { id: 'plata_third', home: null, away: null, homeScore: null, awayScore: null, winner: null, dayDate: '3er Puesto Copa de Plata' },
+     oroDrawn: false,
+     plataDrawn: false,
+-    generated: false
++    generated: false,
++    numGroups: numGroups
+   };
+ }
+ 
+@@ -410,14 +425,37 @@
+ // FORMAT SWITCHING & GROUP DRAW BACKEND LOGIC
+ // --------------------------------------------------------------------------
+ 
++// Devuelve true si la categoría ya tiene partidos EN VIVO o FINALIZADOS cargados
++// (resultados reales), para evitar regenerar el fixture y perderlos sin avisar.
++function categoryHasRealProgress(catData) {
++  if (!catData) return false;
++  return (catData.fixtures || []).some(j => (j.matches || []).some(m => m.status === 'finished' || m.status === 'live'));
++}
++
++function confirmOverwriteIfNeeded(catYear, catData) {
++  if (!categoryHasRealProgress(catData)) return true;
++  return confirm(`⚠️ La categoría ${catYear} ya tiene partidos EN VIVO o FINALIZADOS cargados.\n\nEsta acción va a REGENERAR el fixture completo y esos resultados reales se PERDERÍAN.\n\n¿Confirmás que querés continuar de todas formas?`);
++}
++
+ function switchCategoryFormat(catYear, newFormat) {
+   if (!appState.isAdmin) return openAdminPinModal();
+   const catData = appState.categoriesData[catYear];
+   if (!catData) return;
+ 
++  if (catData.format === newFormat) return;
++  if (!confirmOverwriteIfNeeded(catYear, catData)) return;
++
+   catData.format = newFormat;
+   if (newFormat === 'groups_cup') {
+-    executeGroupDrawBackend(catYear, false);
++    if (catData.groupsSource === 'manual' && catData.groups && Object.keys(catData.groups).length > 0) {
++      // Los grupos ya fueron cargados a mano (sorteo real, informado a los equipos):
++      // solo se regenera el fixture con esos grupos, sin volver a sortear al azar.
++      const numGroups = catData.numGroups || Object.keys(catData.groups).length;
++      catData.fixtures = generateGroupsFixtures(catData.groups, catYear);
++      catData.playoffs = createEmptyPlayoffsObj(numGroups);
++    } else {
++      executeGroupDrawBackend(catYear, false);
++    }
+   } else {
+     catData.fixtures = generateSingleTableFixture(catData.teams, catYear);
+     catData.playoffs = createEmptyPlayoffsObj();
+@@ -430,18 +468,23 @@
+   const catData = appState.categoriesData[catYear];
+   if (!catData || !catData.teams || catData.teams.length === 0) return;
+ 
++  const numGroups = catData.numGroups || 3;
++  const groupLetters = generateGroupLetters(numGroups);
++
+   const shuffled = [...catData.teams].sort(() => Math.random() - 0.5);
+-  const groups = { A: [], B: [], C: [] };
+-  
++  const groups = {};
++  groupLetters.forEach(l => { groups[l] = []; });
++
+   shuffled.forEach((team, index) => {
+-    if (index % 3 === 0) groups.A.push(team.id);
+-    else if (index % 3 === 1) groups.B.push(team.id);
+-    else groups.C.push(team.id);
++    const letter = groupLetters[index % numGroups];
++    groups[letter].push(team.id);
+   });
+ 
+   catData.groups = groups;
++  catData.numGroups = numGroups;
++  catData.groupsSource = 'random';
+   catData.fixtures = generateGroupsFixtures(groups, catYear);
+-  catData.playoffs = createEmptyPlayoffsObj();
++  catData.playoffs = createEmptyPlayoffsObj(numGroups);
+ 
+   if (resetScores) {
+     saveState();
+@@ -450,8 +493,9 @@
+ 
+ function generateGroupsFixtures(groups, catYear) {
+   const allJornadas = [];
++  const groupKeys = Object.keys(groups || {}).sort();
+ 
+-  ['A', 'B', 'C'].forEach(grpKey => {
++  groupKeys.forEach(grpKey => {
+     const teamIds = (groups && groups[grpKey]) ? groups[grpKey] : [];
+     if (teamIds.length < 2) return;
+ 
+@@ -577,6 +621,13 @@
+ }
+ 
+ function calculateQualifiedTeamsRanking(category) {
++  const catData = appState.categoriesData ? appState.categoriesData[category] : null;
++  const numGroups = (catData && catData.numGroups) || Object.keys((catData && catData.groups) || {}).length || 3;
++
++  if (numGroups === 2) {
++    return calculateCrossQualification(category);
++  }
++
+   const tableA = calculateGroupStandings(category, 'A') || [];
+   const tableB = calculateGroupStandings(category, 'B') || [];
+   const tableC = calculateGroupStandings(category, 'C') || [];
+@@ -601,6 +652,33 @@
+   return { primeros, segundos, terceros, mejoresTerceros, qualifiedList };
+ }
+ 
++// Clasificación para categorías con 2 grupos de 4: pasan los 8 equipos,
++// cruzando grupos: 1° de cada grupo vs 4° del otro grupo, y 2° vs 3° del otro grupo.
++function calculateCrossQualification(category) {
++  const tableA = calculateGroupStandings(category, 'A') || [];
++  const tableB = calculateGroupStandings(category, 'B') || [];
++
++  const cruces = [
++    { home: tableA[0] ? tableA[0].id : null, away: tableB[3] ? tableB[3].id : null },
++    { home: tableB[0] ? tableB[0].id : null, away: tableA[3] ? tableA[3].id : null },
++    { home: tableA[1] ? tableA[1].id : null, away: tableB[2] ? tableB[2].id : null },
++    { home: tableB[1] ? tableB[1].id : null, away: tableA[2] ? tableA[2].id : null }
++  ];
++
++  const qualifiedList = [
++    { rankLabel: '1° Grupo A', team: tableA[0] || null, matchLabel: 'vs 4° Grupo B (Cruce 1)' },
++    { rankLabel: '4° Grupo B', team: tableB[3] || null, matchLabel: 'vs 1° Grupo A (Cruce 1)' },
++    { rankLabel: '1° Grupo B', team: tableB[0] || null, matchLabel: 'vs 4° Grupo A (Cruce 2)' },
++    { rankLabel: '4° Grupo A', team: tableA[3] || null, matchLabel: 'vs 1° Grupo B (Cruce 2)' },
++    { rankLabel: '2° Grupo A', team: tableA[1] || null, matchLabel: 'vs 3° Grupo B (Cruce 3)' },
++    { rankLabel: '3° Grupo B', team: tableB[2] || null, matchLabel: 'vs 2° Grupo A (Cruce 3)' },
++    { rankLabel: '2° Grupo B', team: tableB[1] || null, matchLabel: 'vs 3° Grupo A (Cruce 4)' },
++    { rankLabel: '3° Grupo A', team: tableA[2] || null, matchLabel: 'vs 2° Grupo B (Cruce 4)' }
++  ];
++
++  return { tableA, tableB, cruces, qualifiedList };
++}
++
+ function calculateSingleStandings(category) {
+   const catData = appState.categoriesData ? appState.categoriesData[category] : null;
+   if (!catData) return [];
+@@ -771,21 +849,26 @@
+ 
+   const isGroups = catData.format === 'groups_cup';
+   const fixtures = catData.fixtures || [];
++  const numGroups = catData.numGroups || Object.keys(catData.groups || {}).length || 3;
++  const isManualGroups = catData.groupsSource === 'manual';
+ 
+   return `
+     <div class="format-banner">
+       <div>
+         <span style="font-weight: 700; color: var(--text-muted); font-size: 0.85rem; display: block;">Modalidad de Competición:</span>
+         <span class="format-badge ${isGroups ? 'groups' : 'general'}">
+-          ${isGroups ? '🎲 Sorteo 3 Grupos + Copas Oro y Plata' : '📊 Tabla General Única (Todos contra Todos)'}
++          ${isGroups ? `🎲 Fase de ${numGroups} Grupos + Copas Oro y Plata${isManualGroups ? ' (Grupos Cargados Manualmente)' : ''}` : '📊 Tabla General Única (Todos contra Todos)'}
+         </span>
+       </div>
+       ${appState.isAdmin ? `
+         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+           <button class="btn-secondary" style="font-size: 0.8rem;" onclick="switchCategoryFormat('${appState.currentCategory}', '${isGroups ? 'general_table' : 'groups_cup'}')">
+-            🔄 Cambiar a ${isGroups ? 'Tabla General Única' : 'Sorteo 3 Grupos + Copas'}
++            🔄 Cambiar a ${isGroups ? 'Tabla General Única' : 'Fase de Grupos + Copas'}
+           </button>
+-          ${isGroups ? `
++          <button class="btn-secondary" style="font-size: 0.8rem;" onclick="openManualGroupsModal()">
++            📋 ${isGroups ? 'Editar' : 'Cargar'} Grupos Manualmente
++          </button>
++          ${isGroups && !isManualGroups ? `
+             <button class="btn-primary" style="font-size: 0.8rem;" onclick="startInteractiveGroupDraw()">
+               🎲 Re-Sortear Grupos
+             </button>
+@@ -805,7 +888,10 @@
+       <div style="background: var(--bg-card); padding: 2rem; text-align: center; border-radius: 12px; margin-top: 1rem; border: 1px dashed var(--border-color);">
+         <p style="color: var(--primary-gold); font-weight: 700;">No hay partidos generados aún.</p>
+         ${appState.isAdmin ? `
+-          <button class="btn-primary" style="margin-top: 1rem;" onclick="startInteractiveGroupDraw()">🎲 Realizar Sorteo de Grupos</button>
++          <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem;">
++            <button class="btn-primary" onclick="startInteractiveGroupDraw()">🎲 Realizar Sorteo Aleatorio</button>
++            <button class="btn-secondary" onclick="openManualGroupsModal()">📋 Cargar Grupos Manualmente</button>
++          </div>
+         ` : ''}
+       </div>
+     ` : fixtures.map((jornada) => `
+@@ -889,10 +975,11 @@
+     `;
+   }
+ 
+-  const standingsA = calculateGroupStandings(appState.currentCategory, 'A');
+-  const standingsB = calculateGroupStandings(appState.currentCategory, 'B');
+-  const standingsC = calculateGroupStandings(appState.currentCategory, 'C');
++  const numGroups = catData.numGroups || Object.keys(catData.groups || {}).length || 3;
++  const groupKeys = Object.keys(catData.groups || {}).sort();
++  const groupColors = { A: 'var(--primary-gold)', B: '#38bdf8', C: '#a855f7' };
+   const ranking = calculateQualifiedTeamsRanking(appState.currentCategory);
++  const isCross = numGroups === 2;
+ 
+   return `
+     <div class="section-title">
+@@ -904,38 +991,26 @@
+     </div>
+ 
+     <div class="groups-grid">
+-      <div class="group-card">
+-        <h3 style="color: var(--primary-gold); margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+-          <span>🏆 GRUPO A</span>
+-          <span class="group-badge-A">Grupo A</span>
+-        </h3>
+-        ${renderGroupMiniTable(standingsA)}
+-      </div>
+-
+-      <div class="group-card">
+-        <h3 style="color: #38bdf8; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+-          <span>🏆 GRUPO B</span>
+-          <span class="group-badge-B">Grupo B</span>
+-        </h3>
+-        ${renderGroupMiniTable(standingsB)}
+-      </div>
+-
+-      <div class="group-card">
+-        <h3 style="color: #a855f7; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+-          <span>🏆 GRUPO C</span>
+-          <span class="group-badge-C">Grupo C</span>
+-        </h3>
+-        ${renderGroupMiniTable(standingsC)}
+-      </div>
++      ${groupKeys.map(g => `
++        <div class="group-card">
++          <h3 style="color: ${groupColors[g] || '#fff'}; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
++            <span>🏆 GRUPO ${g}</span>
++            <span class="group-badge-${g}">Grupo ${g}</span>
++          </h3>
++          ${renderGroupMiniTable(calculateGroupStandings(appState.currentCategory, g))}
++        </div>
++      `).join('')}
+     </div>
+ 
+     <div class="table-card" style="margin-top: 2rem;">
+       <div style="padding: 1.25rem; border-bottom: 1px solid var(--border-color); background: rgba(255,215,0,0.05);">
+         <h3 style="color: var(--primary-gold); font-size: 1.15rem; font-weight: 900; text-transform: uppercase;">
+-          ⭐ Ranking General & Clasificados a la Ronda Final (8 Equipos)
++          ⭐ Ranking General & Clasificados a la Ronda Final (${(catData.teams || []).length} Equipos)
+         </h3>
+         <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">
+-          Clasifican los 3 Primeros, los 3 Segundos y los 2 Mejores Terceros de la Fase de Grupos.
++          ${isCross
++            ? 'Pasan los 4 equipos de cada grupo. Se cruzan entre grupos: 1° vs 4°, y 2° vs 3°.'
++            : 'Clasifican los 3 Primeros, los 3 Segundos y los 2 Mejores Terceros de la Fase de Grupos.'}
+         </p>
+       </div>
+ 
+@@ -956,17 +1031,19 @@
+             ${(ranking.qualifiedList || []).map((item, idx) => {
+               const t = item.team;
+               if (!t) return `<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">${item.rankLabel}: Por definir</td></tr>`;
+-              const isTercero = idx >= 6;
++              const isTercero = !isCross && idx >= 6;
+ 
+-              let matchLabel = '';
+-              if (idx === 0) matchLabel = 'vs 2° Mejor Tercero (Cruce 1)';
+-              if (idx === 1) matchLabel = 'vs 1er Mejor Tercero (Cruce 2)';
+-              if (idx === 2) matchLabel = 'vs Peor Segundo (Cruce 3)';
+-              if (idx === 3) matchLabel = 'vs 2do Mejor Segundo (Cruce 4)';
+-              if (idx === 4) matchLabel = 'vs 1er Mejor Segundo (Cruce 4)';
+-              if (idx === 5) matchLabel = 'vs 3er Mejor Primero (Cruce 3)';
+-              if (idx === 6) matchLabel = 'vs 2do Mejor Primero (Cruce 2)';
+-              if (idx === 7) matchLabel = 'vs 1er Mejor Primero (Cruce 1)';
++              let matchLabel = item.matchLabel || '';
++              if (!isCross && !matchLabel) {
++                if (idx === 0) matchLabel = 'vs 2° Mejor Tercero (Cruce 1)';
++                if (idx === 1) matchLabel = 'vs 1er Mejor Tercero (Cruce 2)';
++                if (idx === 2) matchLabel = 'vs Peor Segundo (Cruce 3)';
++                if (idx === 3) matchLabel = 'vs 2do Mejor Segundo (Cruce 4)';
++                if (idx === 4) matchLabel = 'vs 1er Mejor Segundo (Cruce 4)';
++                if (idx === 5) matchLabel = 'vs 3er Mejor Primero (Cruce 3)';
++                if (idx === 6) matchLabel = 'vs 2do Mejor Primero (Cruce 2)';
++                if (idx === 7) matchLabel = 'vs 1er Mejor Primero (Cruce 1)';
++              }
+ 
+               return `
+                 <tr class="${isTercero ? 'tr-qualify-tercero' : 'tr-qualify-oro'}">
+@@ -1078,31 +1155,44 @@
+     return renderCrucesSingleTableMarkup();
+   }
+ 
++  const numGroups = catData.numGroups || Object.keys(catData.groups || {}).length || 3;
+   const ranking = calculateQualifiedTeamsRanking(appState.currentCategory);
+-  const playoffs = catData.playoffs || createEmptyPlayoffsObj();
++  const playoffs = catData.playoffs || createEmptyPlayoffsObj(numGroups);
+   catData.playoffs = playoffs;
+ 
+-  const p1_1 = ranking.qualifiedList[0] ? ranking.qualifiedList[0].team : null;
+-  const p1_2 = ranking.qualifiedList[1] ? ranking.qualifiedList[1].team : null;
+-  const p1_3 = ranking.qualifiedList[2] ? ranking.qualifiedList[2].team : null;
+-  const p2_1 = ranking.qualifiedList[3] ? ranking.qualifiedList[3].team : null;
+-  const p2_2 = ranking.qualifiedList[4] ? ranking.qualifiedList[4].team : null;
+-  const p2_3 = ranking.qualifiedList[5] ? ranking.qualifiedList[5].team : null;
+-  const p3_1 = ranking.qualifiedList[6] ? ranking.qualifiedList[6].team : null;
+-  const p3_2 = ranking.qualifiedList[7] ? ranking.qualifiedList[7].team : null;
+-
+-  if (playoffs.initialCruces && playoffs.initialCruces.length >= 4) {
+-    playoffs.initialCruces[0].home = playoffs.initialCruces[0].home || (p1_1 ? p1_1.id : null);
+-    playoffs.initialCruces[0].away = playoffs.initialCruces[0].away || (p3_2 ? p3_2.id : null);
++  if (numGroups === 2) {
++    // 2 grupos: cruces directos 1°vs4° y 2°vs3° cruzando grupos (ver ranking.cruces)
++    if (playoffs.initialCruces && playoffs.initialCruces.length >= 4 && ranking.cruces) {
++      ranking.cruces.forEach((c, i) => {
++        if (playoffs.initialCruces[i]) {
++          playoffs.initialCruces[i].home = playoffs.initialCruces[i].home || c.home;
++          playoffs.initialCruces[i].away = playoffs.initialCruces[i].away || c.away;
++        }
++      });
++    }
++  } else {
++    const p1_1 = ranking.qualifiedList[0] ? ranking.qualifiedList[0].team : null;
++    const p1_2 = ranking.qualifiedList[1] ? ranking.qualifiedList[1].team : null;
++    const p1_3 = ranking.qualifiedList[2] ? ranking.qualifiedList[2].team : null;
++    const p2_1 = ranking.qualifiedList[3] ? ranking.qualifiedList[3].team : null;
++    const p2_2 = ranking.qualifiedList[4] ? ranking.qualifiedList[4].team : null;
++    const p2_3 = ranking.qualifiedList[5] ? ranking.qualifiedList[5].team : null;
++    const p3_1 = ranking.qualifiedList[6] ? ranking.qualifiedList[6].team : null;
++    const p3_2 = ranking.qualifiedList[7] ? ranking.qualifiedList[7].team : null;
++
++    if (playoffs.initialCruces && playoffs.initialCruces.length >= 4) {
++      playoffs.initialCruces[0].home = playoffs.initialCruces[0].home || (p1_1 ? p1_1.id : null);
++      playoffs.initialCruces[0].away = playoffs.initialCruces[0].away || (p3_2 ? p3_2.id : null);
+ 
+-    playoffs.initialCruces[1].home = playoffs.initialCruces[1].home || (p1_2 ? p1_2.id : null);
+-    playoffs.initialCruces[1].away = playoffs.initialCruces[1].away || (p3_1 ? p3_1.id : null);
++      playoffs.initialCruces[1].home = playoffs.initialCruces[1].home || (p1_2 ? p1_2.id : null);
++      playoffs.initialCruces[1].away = playoffs.initialCruces[1].away || (p3_1 ? p3_1.id : null);
+ 
+-    playoffs.initialCruces[2].home = playoffs.initialCruces[2].home || (p1_3 ? p1_3.id : null);
+-    playoffs.initialCruces[2].away = playoffs.initialCruces[2].away || (p2_3 ? p2_3.id : null);
++      playoffs.initialCruces[2].home = playoffs.initialCruces[2].home || (p1_3 ? p1_3.id : null);
++      playoffs.initialCruces[2].away = playoffs.initialCruces[2].away || (p2_3 ? p2_3.id : null);
+ 
+-    playoffs.initialCruces[3].home = playoffs.initialCruces[3].home || (p2_1 ? p2_1.id : null);
+-    playoffs.initialCruces[3].away = playoffs.initialCruces[3].away || (p2_2 ? p2_2.id : null);
++      playoffs.initialCruces[3].home = playoffs.initialCruces[3].home || (p2_1 ? p2_1.id : null);
++      playoffs.initialCruces[3].away = playoffs.initialCruces[3].away || (p2_2 ? p2_2.id : null);
++    }
+   }
+ 
+   return `
+@@ -1231,9 +1321,9 @@
+ 
+   return `
+     <div class="bracket-match">
+-      <div style="background: rgba(0,0,0,0.5); padding: 0.35rem 0.65rem; font-size: 0.75rem; color: var(--primary-gold); font-weight: 800; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between;">
++      <div style="background: rgba(0,0,0,0.5); padding: 0.35rem 0.65rem; font-size: 0.75rem; color: var(--primary-gold); font-weight: 800; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.25rem;">
+         <span>${titleLabel}</span>
+-        <span>${m.dayDate || 'Por definir'}</span>
++        <span>${m.dayDate || 'Por definir'}${m.pitch ? ' • 🏟️ ' + m.pitch : ''}</span>
+       </div>
+ 
+       <div class="bracket-team ${m.winner === m.home && m.home ? 'winner' : ''}">
+@@ -1316,6 +1406,9 @@
+ function startInteractiveGroupDraw() {
+   if (!appState.isAdmin) return openAdminPinModal();
+ 
++  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
++  if (!confirmOverwriteIfNeeded(appState.currentCategory, catData)) return;
++
+   const modal = document.getElementById('drawModal');
+   const stage = document.getElementById('drawStageContent');
+   if (!modal || !stage) return;
+@@ -1342,36 +1435,24 @@
+   const stage = document.getElementById('drawStageContent');
+   if (!catData || !stage) return;
+ 
+-  const grpA = (catData.groups && catData.groups.A) ? catData.groups.A : [];
+-  const grpB = (catData.groups && catData.groups.B) ? catData.groups.B : [];
+-  const grpC = (catData.groups && catData.groups.C) ? catData.groups.C : [];
++  const groupKeys = Object.keys(catData.groups || {}).sort();
++  const groupColors = { A: 'var(--primary-gold)', B: '#38bdf8', C: '#a855f7' };
++  const groupBg = { A: 'rgba(255,215,0,0.1)', B: 'rgba(56,189,248,0.1)', C: 'rgba(168,85,247,0.1)' };
+ 
+   stage.innerHTML = `
+     <div style="text-align: center;">
+       <h2 style="color: var(--primary-gold); font-weight: 900;">🎉 ¡SORTEO COMPLETADO EXITOSAMENTE!</h2>
+-      <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Los equipos se organizaron automáticamente en los 3 Grupos:</p>
+-
+-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; text-align: left; margin-bottom: 1.5rem;">
+-        <div style="background: rgba(255,215,0,0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--primary-gold);">
+-          <h4 style="color: var(--primary-gold); font-weight: 900;">GRUPO A</h4>
+-          <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
+-            ${grpA.map(id => `<li>${getTeamName(id)}</li>`).join('')}
+-          </ul>
+-        </div>
+-
+-        <div style="background: rgba(56,189,248,0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid #38bdf8;">
+-          <h4 style="color: #38bdf8; font-weight: 900;">GRUPO B</h4>
+-          <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
+-            ${grpB.map(id => `<li>${getTeamName(id)}</li>`).join('')}
+-          </ul>
+-        </div>
++      <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Los equipos se organizaron automáticamente en ${groupKeys.length} Grupos:</p>
+ 
+-        <div style="background: rgba(168,85,247,0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid #a855f7;">
+-          <h4 style="color: #a855f7; font-weight: 900;">GRUPO C</h4>
+-          <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
+-            ${grpC.map(id => `<li>${getTeamName(id)}</li>`).join('')}
+-          </ul>
+-        </div>
++      <div style="display: grid; grid-template-columns: repeat(${groupKeys.length}, 1fr); gap: 0.75rem; text-align: left; margin-bottom: 1.5rem;">
++        ${groupKeys.map(g => `
++          <div style="background: ${groupBg[g] || 'rgba(255,255,255,0.05)'}; padding: 0.75rem; border-radius: 8px; border: 1px solid ${groupColors[g] || '#fff'};">
++            <h4 style="color: ${groupColors[g] || '#fff'}; font-weight: 900;">GRUPO ${g}</h4>
++            <ul style="padding-left: 1rem; font-size: 0.85rem; margin-top: 0.5rem;">
++              ${(catData.groups[g] || []).map(id => `<li>${getTeamName(id)}</li>`).join('')}
++            </ul>
++          </div>
++        `).join('')}
+       </div>
+ 
+       <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="closeDrawModal()">
+@@ -1388,6 +1469,142 @@
+ }
+ 
+ // --------------------------------------------------------------------------
++// CARGA MANUAL DE GRUPOS (sorteo ya realizado fuera del sistema, sin azar)
++// --------------------------------------------------------------------------
++
++let manualGroupsDraft = { numGroups: 3, assignment: {} };
++
++function openManualGroupsModal() {
++  if (!appState.isAdmin) return openAdminPinModal();
++  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
++  if (!catData) return;
++
++  const modal = document.getElementById('manualGroupsModal');
++  const content = document.getElementById('manualGroupsContent');
++  if (!modal || !content) return;
++
++  const currentNumGroups = catData.numGroups || Object.keys(catData.groups || {}).length || 3;
++  const groupsObj = catData.groups || {};
++  const assignment = {};
++  (catData.teams || []).forEach(t => {
++    let currentGroup = '';
++    Object.keys(groupsObj).forEach(g => {
++      if ((groupsObj[g] || []).includes(t.id)) currentGroup = g;
++    });
++    assignment[t.id] = currentGroup;
++  });
++
++  manualGroupsDraft = { numGroups: currentNumGroups, assignment: assignment };
++
++  content.innerHTML = renderManualGroupsModalContent(catData);
++  modal.classList.add('open');
++}
++
++function renderManualGroupsModalContent(catData) {
++  const letters = generateGroupLetters(manualGroupsDraft.numGroups);
++  return `
++    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
++      Cargá a mano en qué grupo quedó cada equipo según el sorteo ya realizado (sin generar un sorteo aleatorio nuevo).
++      El fixture de la fase de grupos se arma automáticamente en base a esta carga.
++    </p>
++
++    <div class="form-group">
++      <label>Cantidad de Grupos</label>
++      <select class="form-input" onchange="changeManualGroupsCount(this.value)">
++        <option value="2" ${manualGroupsDraft.numGroups === 2 ? 'selected' : ''}>2 Grupos (equipos incompletos)</option>
++        <option value="3" ${manualGroupsDraft.numGroups === 3 ? 'selected' : ''}>3 Grupos (formato estándar 12 equipos)</option>
++      </select>
++    </div>
++
++    <div style="max-height: 320px; overflow-y: auto; margin-top: 1rem;">
++      ${(catData.teams || []).map(t => `
++        <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);">
++          <span style="font-weight: 700; font-size: 0.9rem;">${t.name}</span>
++          <select class="form-input" style="max-width: 160px;" onchange="setManualGroupAssignment('${t.id}', this.value)">
++            <option value="">Sin asignar</option>
++            ${letters.map(l => `<option value="${l}" ${manualGroupsDraft.assignment[t.id] === l ? 'selected' : ''}>Grupo ${l}</option>`).join('')}
++          </select>
++        </div>
++      `).join('')}
++    </div>
++
++    <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
++      <button class="btn-secondary" style="flex: 1; justify-content: center;" onclick="closeManualGroupsModal()">Cancelar</button>
++      <button class="btn-primary" style="flex: 1; justify-content: center;" onclick="saveManualGroups()">Guardar Grupos y Generar Fixture</button>
++    </div>
++  `;
++}
++
++function changeManualGroupsCount(val) {
++  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
++  if (!catData) return;
++  const numGroups = parseInt(val, 10);
++  manualGroupsDraft.numGroups = numGroups;
++
++  const letters = generateGroupLetters(numGroups);
++  Object.keys(manualGroupsDraft.assignment).forEach(tid => {
++    if (manualGroupsDraft.assignment[tid] && letters.indexOf(manualGroupsDraft.assignment[tid]) === -1) {
++      manualGroupsDraft.assignment[tid] = '';
++    }
++  });
++
++  const content = document.getElementById('manualGroupsContent');
++  if (content) content.innerHTML = renderManualGroupsModalContent(catData);
++}
++
++function setManualGroupAssignment(teamId, groupLetter) {
++  manualGroupsDraft.assignment[teamId] = groupLetter;
++}
++
++function saveManualGroups() {
++  if (!appState.isAdmin) return;
++  const catYear = appState.currentCategory;
++  const catData = appState.categoriesData ? appState.categoriesData[catYear] : null;
++  if (!catData) return;
++
++  const numGroups = manualGroupsDraft.numGroups;
++  const letters = generateGroupLetters(numGroups);
++  const groups = {};
++  letters.forEach(l => { groups[l] = []; });
++
++  let unassignedCount = 0;
++  (catData.teams || []).forEach(t => {
++    const g = manualGroupsDraft.assignment[t.id];
++    if (g && groups[g]) {
++      groups[g].push(t.id);
++    } else {
++      unassignedCount++;
++    }
++  });
++
++  if (unassignedCount > 0) {
++    if (!confirm(`Hay ${unassignedCount} equipo(s) sin asignar a un grupo. ¿Confirmás que querés guardar así de todas formas?`)) return;
++  }
++
++  const hasProgress = categoryHasRealProgress(catData);
++  if (hasProgress) {
++    if (!confirm('Ya hay partidos EN VIVO o FINALIZADOS cargados en esta categoría. Guardar los grupos ahora va a REGENERAR todo el fixture de la fase de grupos y esos resultados se perderían. ¿Confirmás que querés continuar?')) return;
++  }
++
++  catData.groups = groups;
++  catData.numGroups = numGroups;
++  catData.format = 'groups_cup';
++  catData.groupsSource = 'manual';
++  catData.fixtures = generateGroupsFixtures(groups, catYear);
++  catData.playoffs = createEmptyPlayoffsObj(numGroups);
++
++  saveState();
++  closeManualGroupsModal();
++  safeRenderApp();
++  alert('Grupos cargados y fixture generado correctamente.');
++}
++
++function closeManualGroupsModal() {
++  const modal = document.getElementById('manualGroupsModal');
++  if (modal) modal.classList.remove('open');
++}
++
++// --------------------------------------------------------------------------
+ // SEMIFINALS DRAW LOGIC (COPA ORO / PLATA)
+ // --------------------------------------------------------------------------
+ 
+@@ -1576,41 +1793,67 @@
+   if (!catData) return;
+ 
+   const playoffs = catData.playoffs || createEmptyPlayoffsObj();
+-  let matchObj = null;
++  const matchObj = findPlayoffMatchObj(playoffs, matchKey);
++
++  if (!matchObj || (!matchObj.home && !matchObj.away)) {
++    alert('Primero se deben definir los equipos clasificados a este encuentro.');
++    return;
++  }
++
++  const home = getTeamObj(matchObj.home);
++  const away = getTeamObj(matchObj.away);
+ 
++  document.getElementById('modalPlayoffHomeName').innerText = home.name;
++  document.getElementById('modalPlayoffAwayName').innerText = away.name;
++  document.getElementById('modalPlayoffHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
++  document.getElementById('modalPlayoffAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
++  document.getElementById('modalPlayoffDayDateInput').value = matchObj.dayDate || '';
++  document.getElementById('modalPlayoffPitchInput').value = matchObj.pitch || '';
++
++  document.getElementById('playoffScoreModal').classList.add('open');
++}
++
++function findPlayoffMatchObj(playoffs, matchKey) {
+   if (matchKey.startsWith('cruce_')) {
+     const idx = parseInt(matchKey.split('_')[1], 10);
+-    matchObj = (playoffs.initialCruces || [])[idx];
++    return (playoffs.initialCruces || [])[idx];
+   } else if (matchKey.startsWith('oro_semi_')) {
+     const idx = parseInt(matchKey.split('_')[2], 10);
+-    matchObj = (playoffs.oroSemis || [])[idx];
++    return (playoffs.oroSemis || [])[idx];
+   } else if (matchKey === 'oro_final') {
+-    matchObj = playoffs.oroFinal;
++    return playoffs.oroFinal;
+   } else if (matchKey === 'oro_third') {
+-    matchObj = playoffs.oroThird;
++    return playoffs.oroThird;
+   } else if (matchKey.startsWith('plata_semi_')) {
+     const idx = parseInt(matchKey.split('_')[2], 10);
+-    matchObj = (playoffs.plataSemis || [])[idx];
++    return (playoffs.plataSemis || [])[idx];
+   } else if (matchKey === 'plata_final') {
+-    matchObj = playoffs.plataFinal;
++    return playoffs.plataFinal;
+   } else if (matchKey === 'plata_third') {
+-    matchObj = playoffs.plataThird;
++    return playoffs.plataThird;
+   }
++  return null;
++}
+ 
+-  if (!matchObj || (!matchObj.home && !matchObj.away)) {
+-    alert('Primero se deben definir los equipos clasificados a este encuentro.');
+-    return;
+-  }
++// Guarda solo día/horario y cancha del cruce, sin tocar resultado/ganador.
++// Útil para fijar (o corregir) el horario ya informado sin forzar una definición de ganador.
++function savePlayoffSchedule() {
++  if (!appState.isAdmin || !currentPlayoffMatchKey) return;
+ 
+-  const home = getTeamObj(matchObj.home);
+-  const away = getTeamObj(matchObj.away);
++  const catData = appState.categoriesData ? appState.categoriesData[appState.currentCategory] : null;
++  if (!catData) return;
+ 
+-  document.getElementById('modalPlayoffHomeName').innerText = home.name;
+-  document.getElementById('modalPlayoffAwayName').innerText = away.name;
+-  document.getElementById('modalPlayoffHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
+-  document.getElementById('modalPlayoffAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
++  const playoffs = catData.playoffs || createEmptyPlayoffsObj();
++  const matchObj = findPlayoffMatchObj(playoffs, currentPlayoffMatchKey);
+ 
+-  document.getElementById('playoffScoreModal').classList.add('open');
++  if (matchObj) {
++    matchObj.dayDate = document.getElementById('modalPlayoffDayDateInput').value.trim();
++    matchObj.pitch = document.getElementById('modalPlayoffPitchInput').value.trim();
++  }
++
++  saveState();
++  closePlayoffScoreModal();
++  safeRenderApp();
+ }
+ 
+ function savePlayoffScore() {
+@@ -1622,30 +1865,16 @@
+   const playoffs = catData.playoffs || createEmptyPlayoffsObj();
+   const homeScore = parseInt(document.getElementById('modalPlayoffHomeInput').value, 10);
+   const awayScore = parseInt(document.getElementById('modalPlayoffAwayInput').value, 10);
++  const dayDate = document.getElementById('modalPlayoffDayDateInput').value.trim();
++  const pitch = document.getElementById('modalPlayoffPitchInput').value.trim();
+ 
+-  let matchObj = null;
+-  if (currentPlayoffMatchKey.startsWith('cruce_')) {
+-    const idx = parseInt(currentPlayoffMatchKey.split('_')[1], 10);
+-    matchObj = (playoffs.initialCruces || [])[idx];
+-  } else if (currentPlayoffMatchKey.startsWith('oro_semi_')) {
+-    const idx = parseInt(currentPlayoffMatchKey.split('_')[2], 10);
+-    matchObj = (playoffs.oroSemis || [])[idx];
+-  } else if (currentPlayoffMatchKey === 'oro_final') {
+-    matchObj = playoffs.oroFinal;
+-  } else if (currentPlayoffMatchKey === 'oro_third') {
+-    matchObj = playoffs.oroThird;
+-  } else if (currentPlayoffMatchKey.startsWith('plata_semi_')) {
+-    const idx = parseInt(currentPlayoffMatchKey.split('_')[2], 10);
+-    matchObj = (playoffs.plataSemis || [])[idx];
+-  } else if (currentPlayoffMatchKey === 'plata_final') {
+-    matchObj = playoffs.plataFinal;
+-  } else if (currentPlayoffMatchKey === 'plata_third') {
+-    matchObj = playoffs.plataThird;
+-  }
++  const matchObj = findPlayoffMatchObj(playoffs, currentPlayoffMatchKey);
+ 
+   if (matchObj) {
+     matchObj.homeScore = isNaN(homeScore) ? 0 : homeScore;
+     matchObj.awayScore = isNaN(awayScore) ? 0 : awayScore;
++    matchObj.dayDate = dayDate;
++    matchObj.pitch = pitch;
+ 
+     if (homeScore === awayScore) {
+       const choice = prompt(`Empate ${homeScore}-${awayScore}. Elige Ganador por penales (1 para ${getTeamName(matchObj.home)} o 2 para ${getTeamName(matchObj.away)}):`, '1');
+@@ -1653,7 +1882,7 @@
+       matchObj.loser = choice === '2' ? matchObj.home : matchObj.away;
+     } else {
+       matchObj.winner = homeScore > awayScore ? matchObj.home : matchObj.away;
+-      matchObj.loser = homeScore > awayScore ? matchObj.away : matchObj.away;
++      matchObj.loser = homeScore > awayScore ? matchObj.away : matchObj.home;
+     }
+ 
+     syncSemisToFinals('oro');
+@@ -1783,11 +2012,12 @@
+ 
+   if (!matchObj) return;
+ 
+-  const home = getTeamObj(matchObj.home);
+-  const away = getTeamObj(matchObj.away);
++  const catTeams = catData.teams || [];
++  const homeSelect = document.getElementById('modalHomeTeamSelect');
++  const awaySelect = document.getElementById('modalAwayTeamSelect');
++  if (homeSelect) homeSelect.innerHTML = catTeams.map(t => `<option value="${t.id}" ${t.id === matchObj.home ? 'selected' : ''}>${t.name}</option>`).join('');
++  if (awaySelect) awaySelect.innerHTML = catTeams.map(t => `<option value="${t.id}" ${t.id === matchObj.away ? 'selected' : ''}>${t.name}</option>`).join('');
+ 
+-  document.getElementById('modalHomeName').innerText = home.name;
+-  document.getElementById('modalAwayName').innerText = away.name;
+   document.getElementById('modalHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
+   document.getElementById('modalAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
+   document.getElementById('modalStatusSelect').value = matchObj.status;
+@@ -1808,7 +2038,17 @@
+   const homeScore = parseInt(document.getElementById('modalHomeInput').value, 10);
+   const awayScore = parseInt(document.getElementById('modalAwayInput').value, 10);
+   const status = document.getElementById('modalStatusSelect').value;
+-  
++
++  const homeTeamSelect = document.getElementById('modalHomeTeamSelect');
++  const awayTeamSelect = document.getElementById('modalAwayTeamSelect');
++  const homeTeamId = homeTeamSelect ? homeTeamSelect.value : null;
++  const awayTeamId = awayTeamSelect ? awayTeamSelect.value : null;
++
++  if (homeTeamId && awayTeamId && homeTeamId === awayTeamId) {
++    alert('El equipo Local y el Visitante no pueden ser el mismo equipo.');
++    return;
++  }
++
+   const dayDate = document.getElementById('modalDayDateInput').value.trim();
+   const time = document.getElementById('modalTimeInput').value.trim();
+   const pitch = document.getElementById('modalPitchInput').value.trim();
+@@ -1816,6 +2056,8 @@
+   (catData.fixtures || []).forEach(j => {
+     const matchObj = (j.matches || []).find(m => m.id === currentEditingMatchId);
+     if (matchObj) {
++      if (homeTeamId) matchObj.home = homeTeamId;
++      if (awayTeamId) matchObj.away = awayTeamId;
+       matchObj.homeScore = isNaN(homeScore) ? 0 : homeScore;
+       matchObj.awayScore = isNaN(awayScore) ? 0 : awayScore;
+       matchObj.status = status;
