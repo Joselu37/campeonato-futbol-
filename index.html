@@ -89,17 +89,22 @@
 
       <div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1rem; text-align: center; margin-bottom: 1.25rem;">
         <div>
-          <h4 id="modalHomeName" style="color: var(--primary-gold); font-weight: 800; font-size: 0.95rem;">Local</h4>
+          <label style="font-size: 0.7rem; color: var(--text-muted);">Local</label>
+          <select id="modalHomeTeamSelect" class="form-input" style="color: var(--primary-gold); font-weight: 800; font-size: 0.85rem; margin-bottom: 0.4rem;"></select>
           <input type="number" id="modalHomeInput" min="0" max="99" class="form-input" style="font-size: 1.8rem; text-align: center; font-weight: 900; margin-top: 0.3rem;">
         </div>
 
         <span style="font-size: 1.5rem; font-weight: 900; color: var(--text-muted);">VS</span>
 
         <div>
-          <h4 id="modalAwayName" style="color: var(--primary-gold); font-weight: 800; font-size: 0.95rem;">Visitante</h4>
+          <label style="font-size: 0.7rem; color: var(--text-muted);">Visitante</label>
+          <select id="modalAwayTeamSelect" class="form-input" style="color: var(--primary-gold); font-weight: 800; font-size: 0.85rem; margin-bottom: 0.4rem;"></select>
           <input type="number" id="modalAwayInput" min="0" max="99" class="form-input" style="font-size: 1.8rem; text-align: center; font-weight: 900; margin-top: 0.3rem;">
         </div>
       </div>
+      <p style="color: var(--text-muted); font-size: 0.75rem; margin: -0.75rem 0 1rem;">
+        ✏️ Podés cambiar qué equipos juegan este partido (por si el cruce difiere del generado automáticamente), manteniendo el mismo día/horario/cancha ya informado.
+      </p>
 
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin-bottom: 1rem;">
         <div class="form-group" style="margin-bottom: 0;">
@@ -159,10 +164,21 @@
         Si el partido termina empatado, al guardar se te pedirá seleccionar cuál de los dos equipos avanzó por penales.
       </p>
 
-      <div style="display: flex; gap: 0.75rem;">
-        <button class="btn-secondary" style="flex: 1; justify-content: center;" onclick="closePlayoffScoreModal()">Cancelar</button>
-        <button class="btn-primary" style="flex: 1; justify-content: center;" onclick="savePlayoffScore()">Guardar y Clasificar</button>
+      <div class="form-group">
+        <label>Día y Horario</label>
+        <input type="text" id="modalPlayoffDayDateInput" class="form-input" placeholder="Ej: Sábado - 15:00 hs">
       </div>
+
+      <div class="form-group">
+        <label>Cancha</label>
+        <input type="text" id="modalPlayoffPitchInput" class="form-input" placeholder="Ej: Cancha 1">
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; margin-bottom: 0.6rem;">
+        <button class="btn-secondary" style="flex: 1; justify-content: center;" onclick="closePlayoffScoreModal()">Cancelar</button>
+        <button class="btn-secondary" style="flex: 1; justify-content: center;" onclick="savePlayoffSchedule()">📅 Guardar Solo Día/Horario</button>
+      </div>
+      <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="savePlayoffScore()">Guardar Resultado y Clasificar</button>
     </div>
   </div>
 
@@ -297,6 +313,20 @@
 
       <div id="drawStageContent" style="text-align: center; padding: 1rem 0;">
         <!-- Dynamically rendered by app.js during live draw -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Groups Loading Modal (Admin) -->
+  <div class="modal-overlay" id="manualGroupsModal">
+    <div class="modal-card" style="max-width: 500px;">
+      <div class="modal-header">
+        <span class="modal-title">📋 Cargar Grupos Manualmente</span>
+        <button class="close-btn" onclick="closeManualGroupsModal()">&times;</button>
+      </div>
+
+      <div id="manualGroupsContent">
+        <!-- Dynamically rendered by app.js -->
       </div>
     </div>
   </div>
