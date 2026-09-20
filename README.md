@@ -66,6 +66,19 @@ equipos, publicidades y resultados ya cargados — no hay que migrar nada.
 4. Revisá la pestaña de Posiciones y Cruces de ambas categorías para
    confirmar que todo quedó como se informó públicamente.
 
+- **Corregir equipos de un cruce mal armado:** en el modal de "Definir
+  Resultado" de cualquier cruce/semifinal/final/3er puesto ahora hay
+  selectores de "Local" y "Visitante" (antes eran fijos, calculados
+  automáticamente en base a la tabla de posiciones). El desplegable solo
+  muestra los **8 equipos que ya clasificaron** a la ronda final (junto con
+  el puesto que ocuparon, ej. "Yacaré (1er Mejor 1°)"), no todos los equipos
+  de la categoría, para que no se pueda elegir por error un equipo que no
+  clasificó. Esto sirve para: (1) corregir un armado automático que quedó mal
+  (por ejemplo, si se abrió la pestaña de Cruces antes de que terminara la
+  fase de grupos), y (2) armar los cruces 100% a mano si el sorteo real ya
+  fue informado. Guardá con "📅 Guardar Solo Día/Horario" si solo querés
+  corregir los equipos/horario sin cargar un resultado todavía.
+
 ## Cómo publicarla como sitio separado (ejemplo con GitHub Pages)
 
 1. Creá un nuevo repositorio en GitHub, por ejemplo `campeonato-futbol-v2`.

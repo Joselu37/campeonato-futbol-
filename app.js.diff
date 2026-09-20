@@ -1,5 +1,5 @@
 --- app.js.bak	2026-09-17 11:22:45.885592367 +0000
-+++ app.js	2026-09-19 23:37:01.859217839 +0000
++++ app.js	2026-09-20 02:55:53.939742918 +0000
 @@ -278,7 +278,8 @@
                catData.fixtures = generateGroupsFixtures(catData.groups, cat);
              }
@@ -598,23 +598,29 @@
  // SEMIFINALS DRAW LOGIC (COPA ORO / PLATA)
  // --------------------------------------------------------------------------
  
-@@ -1576,41 +1793,67 @@
+@@ -1576,41 +1793,81 @@
    if (!catData) return;
  
    const playoffs = catData.playoffs || createEmptyPlayoffsObj();
 -  let matchObj = null;
 +  const matchObj = findPlayoffMatchObj(playoffs, matchKey);
-+
-+  if (!matchObj || (!matchObj.home && !matchObj.away)) {
-+    alert('Primero se deben definir los equipos clasificados a este encuentro.');
+ 
++  if (!matchObj) {
++    alert('No se encontró este cruce.');
 +    return;
 +  }
 +
-+  const home = getTeamObj(matchObj.home);
-+  const away = getTeamObj(matchObj.away);
- 
-+  document.getElementById('modalPlayoffHomeName').innerText = home.name;
-+  document.getElementById('modalPlayoffAwayName').innerText = away.name;
++  const ranking = calculateQualifiedTeamsRanking(appState.currentCategory);
++  const qualifiedTeams = (ranking.qualifiedList || [])
++    .filter(item => item.team)
++    .map(item => ({ id: item.team.id, name: item.team.name, rankLabel: item.rankLabel }));
++
++  const homeSelect = document.getElementById('modalPlayoffHomeTeamSelect');
++  const awaySelect = document.getElementById('modalPlayoffAwayTeamSelect');
++  const optionsHtml = '<option value="">-- Seleccionar equipo --</option>' + qualifiedTeams.map(t => `<option value="${t.id}">${t.name} (${t.rankLabel})</option>`).join('');
++  if (homeSelect) { homeSelect.innerHTML = optionsHtml; homeSelect.value = matchObj.home || ''; }
++  if (awaySelect) { awaySelect.innerHTML = optionsHtml; awaySelect.value = matchObj.away || ''; }
++
 +  document.getElementById('modalPlayoffHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
 +  document.getElementById('modalPlayoffAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
 +  document.getElementById('modalPlayoffDayDateInput').value = matchObj.dayDate || '';
@@ -675,6 +681,14 @@
  
 -  document.getElementById('playoffScoreModal').classList.add('open');
 +  if (matchObj) {
++    const homeTeamId = document.getElementById('modalPlayoffHomeTeamSelect').value;
++    const awayTeamId = document.getElementById('modalPlayoffAwayTeamSelect').value;
++    if (homeTeamId && awayTeamId && homeTeamId === awayTeamId) {
++      alert('El equipo Local y el Visitante no pueden ser el mismo equipo.');
++      return;
++    }
++    matchObj.home = homeTeamId || matchObj.home;
++    matchObj.away = awayTeamId || matchObj.away;
 +    matchObj.dayDate = document.getElementById('modalPlayoffDayDateInput').value.trim();
 +    matchObj.pitch = document.getElementById('modalPlayoffPitchInput').value.trim();
 +  }
@@ -685,7 +699,7 @@
  }
  
  function savePlayoffScore() {
-@@ -1622,30 +1865,16 @@
+@@ -1622,30 +1879,30 @@
    const playoffs = catData.playoffs || createEmptyPlayoffsObj();
    const homeScore = parseInt(document.getElementById('modalPlayoffHomeInput').value, 10);
    const awayScore = parseInt(document.getElementById('modalPlayoffAwayInput').value, 10);
@@ -714,6 +728,20 @@
 +  const matchObj = findPlayoffMatchObj(playoffs, currentPlayoffMatchKey);
  
    if (matchObj) {
++    const homeTeamId = document.getElementById('modalPlayoffHomeTeamSelect').value;
++    const awayTeamId = document.getElementById('modalPlayoffAwayTeamSelect').value;
++    if (homeTeamId && awayTeamId && homeTeamId === awayTeamId) {
++      alert('El equipo Local y el Visitante no pueden ser el mismo equipo.');
++      return;
++    }
++    matchObj.home = homeTeamId || matchObj.home;
++    matchObj.away = awayTeamId || matchObj.away;
++
++    if (!matchObj.home || !matchObj.away) {
++      alert('Definí los dos equipos (Local y Visitante) antes de cargar un resultado.');
++      return;
++    }
++
      matchObj.homeScore = isNaN(homeScore) ? 0 : homeScore;
      matchObj.awayScore = isNaN(awayScore) ? 0 : awayScore;
 +    matchObj.dayDate = dayDate;
@@ -721,7 +749,7 @@
  
      if (homeScore === awayScore) {
        const choice = prompt(`Empate ${homeScore}-${awayScore}. Elige Ganador por penales (1 para ${getTeamName(matchObj.home)} o 2 para ${getTeamName(matchObj.away)}):`, '1');
-@@ -1653,7 +1882,7 @@
+@@ -1653,7 +1910,7 @@
        matchObj.loser = choice === '2' ? matchObj.home : matchObj.away;
      } else {
        matchObj.winner = homeScore > awayScore ? matchObj.home : matchObj.away;
@@ -730,7 +758,7 @@
      }
  
      syncSemisToFinals('oro');
-@@ -1783,11 +2012,12 @@
+@@ -1783,11 +2040,12 @@
  
    if (!matchObj) return;
  
@@ -747,7 +775,7 @@
    document.getElementById('modalHomeInput').value = matchObj.homeScore !== null && matchObj.homeScore !== undefined ? matchObj.homeScore : 0;
    document.getElementById('modalAwayInput').value = matchObj.awayScore !== null && matchObj.awayScore !== undefined ? matchObj.awayScore : 0;
    document.getElementById('modalStatusSelect').value = matchObj.status;
-@@ -1808,7 +2038,17 @@
+@@ -1808,7 +2066,17 @@
    const homeScore = parseInt(document.getElementById('modalHomeInput').value, 10);
    const awayScore = parseInt(document.getElementById('modalAwayInput').value, 10);
    const status = document.getElementById('modalStatusSelect').value;
@@ -766,7 +794,7 @@
    const dayDate = document.getElementById('modalDayDateInput').value.trim();
    const time = document.getElementById('modalTimeInput').value.trim();
    const pitch = document.getElementById('modalPitchInput').value.trim();
-@@ -1816,6 +2056,8 @@
+@@ -1816,6 +2084,8 @@
    (catData.fixtures || []).forEach(j => {
      const matchObj = (j.matches || []).find(m => m.id === currentEditingMatchId);
      if (matchObj) {
